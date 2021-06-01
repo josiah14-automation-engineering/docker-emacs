@@ -1,4 +1,4 @@
-FROM alpine:3.9
+FROM alpine:3.13
 
 RUN apk add --no-cache \
         alsa-lib-dev \
@@ -9,10 +9,11 @@ RUN apk add --no-cache \
         build-base \
         curl \
         dpkg \
+        dbus-x11 \
         dpkg-dev \
         fontconfig-dev \
         gawk \
-        gconf-dev \
+        dconf \
         giflib-dev \
         git \
         glib-dev \
@@ -33,13 +34,14 @@ RUN apk add --no-cache \
         paxmark \
         texinfo \
         tiff-dev \
+        emacs-x11 \
         wget
 
 RUN git clone --depth 1 --branch emacs-27.2 git://git.sv.gnu.org/emacs.git /opt/emacs && \
     cd /opt/emacs && \
     ./autogen.sh && \
     ./configure --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" --with-modules && \
-    make && \
+    make -j 12 && \
     make install
 
 RUN mkdir -p /root/.emacs.d/elpa/gnupg && \
