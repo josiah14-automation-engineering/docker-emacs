@@ -1,7 +1,7 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
-RUN apt-get update && \
-    apt-get install -y \
+RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
+    DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get install -y \
             autoconf \
             automake \
             autotools-dev \
@@ -10,6 +10,10 @@ RUN apt-get update && \
             dpkg-dev \
             git \
             gnupg \
+            libgccjit0 \
+            libgccjit-9-dev \
+            libgccjit-10-dev \
+            gcc-10 \
             imagemagick \
             iputils-ping \
             ispell \
@@ -42,11 +46,11 @@ RUN apt-get update && \
             zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch emacs-27.2 git://git.sv.gnu.org/emacs.git /opt/emacs && \
+RUN git clone --depth 1 --branch emacs-27.2 git://git.savannah.gnu.org/emacs.git /opt/emacs && \
     cd /opt/emacs && \
     ./autogen.sh && \
-    ./configure --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" --with-modules && \
-    make && \
+    ./configure --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" --with-modules && \
+    make -j"$(nproc)" && \
     make install
 
 RUN mkdir -p /root/.emacs.d/elpa/gnupg && \

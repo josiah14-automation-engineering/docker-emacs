@@ -6,94 +6,93 @@ Run Emacs in docker containers!
 
 # Images
 
-| OS                                | Tag                      | Size (MB) | Inherits from      | Contents                                                              |
-|-----------------------------------|--------------------------|-----------|--------------------|-----------------------------------------------------------------------|
-| [Ubuntu](https://ubuntu.com)      | $version                 |       450 |                    | Emacs, curl, gnupg & imagemagick                                      |
-| [Ubuntu](https://ubuntu.com)      | $version-dev             |      1400 | $version           | All build dependencies & source in `/opt/emacs`                       |
-| [Ubuntu](https://ubuntu.com)      | $version-ci              |       480 | $version           | [git](https://git-scm.com) & make                                     |
-| [Ubuntu](https://ubuntu.com)      | $version-ci-cask         |       520 | $version-ci        | [Cask](https://caskreadthedocs.io) & [Python](https://www.python.org) |
-| [Ubuntu](https://ubuntu.com)      | $version-ci-eldev        |       480 | $version-ci        | [eldev](https://github.com/doublep/eldev)                             |
-| [Ubuntu](https://ubuntu.com)      | $version-ci-keg          |       480 | $version-ci        | [keg](https://github.com/conao3/kegel)                                |
-| [Alpine](https://alpinelinux.org) | $version-alpine          |       220 |                    | Emacs, curl, gnupg & imagemagick                                      |
-| [Alpine](https://alpinelinux.org) | $version-alpine-dev      |      1200 | $version-alpine    | All build dependencies & source in `/opt/emacs`                       |
-| [Alpine](https://alpinelinux.org) | $version-alpine-ci       |       240 | $version-alpine    | [git](https://git-scm.com) & make                                     |
-| [Alpine](https://alpinelinux.org) | $version-alpine-ci-cask  |       280 | $version-alpine-ci | [Cask](https://caskreadthedocs.io) & [Python](https://www.python.org) |
-| [Alpine](https://alpinelinux.org) | $version-alpine-ci-eldev |       240 | $version-alpine-ci | [eldev](https://github.com/doublep/eldev)                             |
-| [Alpine](https://alpinelinux.org) | $version-alpine-ci-keg   |       240 | $version-alpine-ci | [keg](https://github.com/conao3/kegel)                                |
+| OS                           | Tag                   | Size (MB) | Inherits from      | Contents                                        |
+|------------------------------|-----------------------|-------|------------------------|-------------------------------------------------|
+| [Ubuntu](https://ubuntu.com) | 27.2-ubuntu-20.04     | 3.59G | 27.2-ubuntu-20.04-dev  | Emacs, curl, gnupg & imagemagick                |
+| [Ubuntu](https://ubuntu.com) | 27.2-ubuntu-20.04-dev | 1.83G | ubuntu:20.04           | All build dependencies & source in `/opt/emacs` |
 
-# Tags
-
-- [`master`](https://github.com/Silex/docker-emacs/blob/master/master/ubuntu/18.04/Dockerfile)
-- [`master-dev`](https://github.com/Silex/docker-emacs/blob/master/master/ubuntu/18.04/dev/Dockerfile)
-- [`master-ci`](https://github.com/Silex/docker-emacs/blob/master/master/ubuntu/18.04/ci/Dockerfile)
-- [`master-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/master/ubuntu/18.04/ci/cask/Dockerfile)
-- [`master-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/master/ubuntu/18.04/ci/eldev/Dockerfile)
-- [`master-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/master/ubuntu/18.04/ci/keg/Dockerfile)
-- [`master-alpine`](https://github.com/Silex/docker-emacs/blob/master/master/alpine/3.9/Dockerfile)
-- [`master-alpine-dev`](https://github.com/Silex/docker-emacs/blob/master/master/alpine/3.9/dev/Dockerfile)
-- [`master-alpine-ci`](https://github.com/Silex/docker-emacs/blob/master/master/alpine/3.9/ci/Dockerfile)
-- [`master-alpine-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/master/alpine/3.9/ci/cask/Dockerfile)
-- [`master-alpine-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/master/alpine/3.9/ci/eldev/Dockerfile)
-- [`master-alpine-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/master/alpine/3.9/ci/keg/Dockerfile)
-- [`27.2`, `27`, `latest`](https://github.com/Silex/docker-emacs/blob/master/27.2/ubuntu/18.04/Dockerfile)
-- [`27.2-dev`, `27-dev`, `dev`](https://github.com/Silex/docker-emacs/blob/master/27.2/ubuntu/18.04/dev/Dockerfile)
-- [`27.2-ci`, `27-ci`, `ci`](https://github.com/Silex/docker-emacs/blob/master/27.2/ubuntu/18.04/ci/Dockerfile)
-- [`27.2-ci-cask`, `27-ci-cask`, `cask`](https://github.com/Silex/docker-emacs/blob/master/27.2/ubuntu/18.04/ci/cask/Dockerfile)
-- [`27.2-ci-eldev`, `27-ci-eldev`, `eldev`](https://github.com/Silex/docker-emacs/blob/master/27.2/ubuntu/18.04/ci/eldev/Dockerfile)
-- [`27.2-ci-keg`, `27-ci-keg`, `keg`](https://github.com/Silex/docker-emacs/blob/master/27.2/ubuntu/18.04/ci/keg/Dockerfile)
-- [`27.2-alpine`, `27-alpine`, `alpine`](https://github.com/Silex/docker-emacs/blob/master/27.2/alpine/3.9/Dockerfile)
-- [`27.2-alpine-dev`, `27-alpine-dev`, `alpine-dev`](https://github.com/Silex/docker-emacs/blob/master/27.2/alpine/3.9/dev/Dockerfile)
-- [`27.2-alpine-ci`, `27-alpine-ci`, `alpine-ci`](https://github.com/Silex/docker-emacs/blob/master/27.2/alpine/3.9/ci/Dockerfile)
-- [`27.2-alpine-ci-cask`, `27-alpine-ci-cask`, `alpine-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/27.2/alpine/3.9/ci/cask/Dockerfile)
-- [`27.2-alpine-ci-eldev`, `27-alpine-ci-eldev`, `alpine-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/27.2/alpine/3.9/ci/eldev/Dockerfile)
-- [`27.2-alpine-ci-keg`, `27-alpine-ci-keg`, `alpine-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/27.2/alpine/3.9/ci/keg/Dockerfile)
-- [`26.3`, `26`](https://github.com/Silex/docker-emacs/blob/master/26.3/ubuntu/18.04/Dockerfile)
-- [`26.3-dev`, `26-dev`](https://github.com/Silex/docker-emacs/blob/master/26.3/ubuntu/18.04/dev/Dockerfile)
-- [`26.3-ci`, `26-ci`](https://github.com/Silex/docker-emacs/blob/master/26.3/ubuntu/18.04/ci/Dockerfile)
-- [`26.3-ci-cask`, `26-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/26.3/ubuntu/18.04/ci/cask/Dockerfile)
-- [`26.3-ci-eldev`, `26-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/26.3/ubuntu/18.04/ci/eldev/Dockerfile)
-- [`26.3-ci-keg`, `26-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/26.3/ubuntu/18.04/ci/keg/Dockerfile)
-- [`26.3-alpine`, `26-alpine`](https://github.com/Silex/docker-emacs/blob/master/26.3/alpine/3.9/Dockerfile)
-- [`26.3-alpine-dev`, `26-alpine-dev`](https://github.com/Silex/docker-emacs/blob/master/26.3/alpine/3.9/dev/Dockerfile)
-- [`26.3-alpine-ci`, `26-alpine-ci`](https://github.com/Silex/docker-emacs/blob/master/26.3/alpine/3.9/ci/Dockerfile)
-- [`26.3-alpine-ci-cask`, `26-alpine-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/26.3/alpine/3.9/ci/cask/Dockerfile)
-- [`26.3-alpine-ci-eldev`, `26-alpine-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/26.3/alpine/3.9/ci/eldev/Dockerfile)
-- [`26.3-alpine-ci-keg`, `26-alpine-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/26.3/alpine/3.9/ci/keg/Dockerfile)
-- [`25.3`, `25`](https://github.com/Silex/docker-emacs/blob/master/25.3/ubuntu/18.04/Dockerfile)
-- [`25.3-dev`, `25-dev`](https://github.com/Silex/docker-emacs/blob/master/25.3/ubuntu/18.04/dev/Dockerfile)
-- [`25.3-ci`, `25-ci`](https://github.com/Silex/docker-emacs/blob/master/25.3/ubuntu/18.04/ci/Dockerfile)
-- [`25.3-ci-cask`, `25-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/25.3/ubuntu/18.04/ci/cask/Dockerfile)
-- [`25.3-ci-eldev`, `25-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/25.3/ubuntu/18.04/ci/eldev/Dockerfile)
-- [`25.3-ci-keg`, `25-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/25.3/ubuntu/18.04/ci/keg/Dockerfile)
-- [`25.3-alpine`, `25-alpine`](https://github.com/Silex/docker-emacs/blob/master/25.3/alpine/3.9/Dockerfile)
-- [`25.3-alpine-dev`, `25-alpine-dev`](https://github.com/Silex/docker-emacs/blob/master/25.3/alpine/3.9/dev/Dockerfile)
-- [`25.3-alpine-ci`](https://github.com/Silex/docker-emacs/blob/master/25.3/alpine/3.9/ci/Dockerfile)
-- [`25.3-alpine-ci-cask`](https://github.com/Silex/docker-emacs/blob/master/25.3/alpine/3.9/ci/cask/Dockerfile)
-- [`25.3-alpine-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/25.3/alpine/3.9/ci/eldev/Dockerfile)
-- [`25.3-alpine-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/25.3/alpine/3.9/ci/keg/Dockerfile)
-- [`24.5`, `24`](https://github.com/Silex/docker-emacs/blob/master/24.5/ubuntu/18.04/Dockerfile)
-- [`24.5-dev`, `24-dev`](https://github.com/Silex/docker-emacs/blob/master/24.5/ubuntu/18.04/dev/Dockerfile)
-- [`24.5-ci`, `24-ci`](https://github.com/Silex/docker-emacs/blob/master/24.5/ubuntu/18.04/ci/Dockerfile)
-- [`24.5-ci-eldev`, `24-ci-eldev`](https://github.com/Silex/docker-emacs/blob/master/24.5/ubuntu/18.04/ci/eldev/Dockerfile)
-- [`24.5-ci-keg`, `24-ci-keg`](https://github.com/Silex/docker-emacs/blob/master/24.5/ubuntu/18.04/ci/keg/Dockerfile)
-- [`23.4`, `23`](https://github.com/Silex/docker-emacs/blob/master/23.4/ubuntu/14.04/bootstrap/Dockerfile)
-- [`23.4-dev`, `23-dev`](https://github.com/Silex/docker-emacs/blob/master/23.4/ubuntu/14.04/bootstrap/dev/Dockerfile)
-- [`23.4-ci`, `23-ci`](https://github.com/Silex/docker-emacs/blob/master/23.4/ubuntu/14.04/bootstrap/ci/Dockerfile)
+*Other versions not found in the above chart are not functional/ready and are
+still under development.*
 
 # Usage
 
-## Console
+## To Build the Container
+
+1. As your normal user on the host machine, in a terminal, run `id` and take note
+   of the `uid` displayed for your user.
+1. Open the Dockerfile `./27.2/ubuntu/20.04/Dockerfile` in the text editor of
+   your choice.
+1. On line `55`, change the number, there, to your `uid` from the first step.
+1. Do a find-replace for `josiah` and replace all occurrances _**except for the
+   occurance on line 1**_ with your host system's username that you were
+   logged-in as in the first step when you ran `id` to get the `uid`.
+1. `cd` to `./27.2/ubuntu/20.04/` and run
+   `docker build -t josiah14/emacs:27.2-ubuntu-20.04 .`
+1. Grab a Snickers and find something else to do, it's going to be a bit.
+
+## To Run the Container
+
+### Console
 
 ``` shell
-docker run -it --rm silex/emacs
+docker run -it --rm josiah14/emacs:27.2-ubuntu-20.04
 ```
 
-## GUI
+### GUI
 
 ``` shell
-xhost +local:root # WARN: this comes with security issues
-docker run -it --rm -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix silex/emacs
+docker run -it --rm -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v <absolute-src-path-of-your-code-directory>:<absolute-dest-path-of-your-code-directory> \
+  josiah14/emacs:27.2-ubuntu-20.04
 ```
+
+## On first boot of Doom Emacs from this image/container
+
+Due to the limitations of Doom Emacs in some areas, there were a couple things which I could not
+automate through the Dockerfile. They are relatively minor steps, but still need to be performed.
+
+1. First boot will do some font and unicode mapping. Wait for this to complete.
+1. You would think waiting for the GUI Emacs auto-started by the container would be enough to cache the
+   unicode mapping once-and-for-all, but it's not. Now run `docker ps` to find the name of your
+   container that's currently running Doom Emacs, and then run this `docker exec -it <name of container> bash`.
+   Once in a Bash shell running in the container, run `emacs` to execute Doom Emacs again and wait
+   again for the unicode mapping to finish.
+1. Doom also has an issue where not all of the font symbols/icons it uses can be imported (as far as I can tell) from
+   things like Nerd Fonts or Powerline Fonts. It has some special requirements that can be installed via a command
+   in the Doom Emacs editor: `all-the-icons-install-fonts`. I learned about this [here](https://github.com/hlissner/doom-emacs/issues/724).
+1. Now, once the above steps are completed, commit the current container to a
+   Docker repo and tag of your choosing and everything should work fine on the next boot.
+   You won't have to wait for the editor to perform the font and unicode mapping, and
+   all of the icons should be there for the bottom editor status bar and the other plugins
+   this version of Doom Emacs has installed.
+1. If this still fails, follow the above steps a second time and it should resolve the issue.
+
+## Known Issues
+
+- If you notice that code completion and inference is not fully functioning (as
+  in, the methods off of objects aren't getting indexed, for example), then you
+  probably need to run `sbt bloopInstall` again. To fix this:
+    - run `M-x lsp-metals-build-import` (`M-x` is `<Spc> :` in Doom Emacs)
+    - In the lower right, just to the left of the rocketship icon, you should
+      see some text indicating that `sbt bloopInstall` is running when the
+      Emacs window is in focus. Be patient and wait for this to finish. After
+      `sbt bloopInstall` it also runs through one or more `compile` commands.
+      Once it's finished, LSP Metals will be fully functional.
+    - If doing this doesn't work, from the project root of your Scala project,
+      run `rm -rf ./.bloop` and then try the above 2 steps again.
+    - If it still doesn't work, run `rm -rf ./.bloop && rm -rf ./.metals` from
+      the Scala project's root dir, kill the editor/container, and run it again,
+      and then wait for the full `sbt bloopInstall` process to complete after a
+      full reinitialization of Metals for your project (the editor should ask
+      you to import and initialize the project for Metals again just like
+      anytime you execute the editor for the first time against a Scala project).
+    - If you commit the container again after doing this, you shouldn't have
+      this problem again on the same project. Note that this commit will
+      significantly increase the size of your container (by ~600M, maybe more).
+        - _Ways to reduce container size are being investigated. One potential is
+          to store some things in container volumens instead. For now, I'm just
+          using this container as an emergency "I have no functioning IDE and
+          need something NOW!" solution._
 
 # Alternatives
 
