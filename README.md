@@ -18,16 +18,15 @@ still under development.*
 
 ## To Build the Container
 
-1. As your normal user on the host machine, in a terminal, run `id` and take note
-   of the `uid` displayed for your user.
-1. Open the Dockerfile `./27.2/ubuntu/20.04/Dockerfile` in the text editor of
-   your choice.
-1. On line `55`, change the number, there, to your `uid` from the first step.
-1. Do a find-replace for `josiah` and replace all occurrances _**except for the
-   occurance on line 1**_ with your host system's username that you were
-   logged-in as in the first step when you ran `id` to get the `uid`.
-1. `cd` to `./27.2/ubuntu/20.04/` and run
-   `docker build -t josiah14/emacs:27.2-ubuntu-20.04 .`
+1. `cd` to `./27.2/ubuntu/20.04/`
+1. run the following command from your shell:
+   ```bash
+   docker build \
+   --build-arg username=$USER \
+   --build-arg uid=$UID \
+   -t josiah14/emacs:27.2-ubuntu-20.04 \
+   .
+   ```
 1. Grab a Snickers and find something else to do, it's going to be a bit.
 
 ## To Run the Container
