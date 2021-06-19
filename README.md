@@ -2,7 +2,11 @@
 
 # Description
 
-Run Emacs in docker containers!
+Run Doom Emacs as a Scala IDE in Docker containers!
+
+This version of the Doom Emacs container comes preconfigured such that
+Scala Metals and Bloop are leveraged via the LSP. Custom LSP commands
+for the Scala Mode are under the [Space]-m shortcut.
 
 # Images
 
