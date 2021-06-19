@@ -1,6 +1,9 @@
 FROM josiah14/emacs:27.2-ubuntu20.04-dev
 FROM ubuntu:20.04
 
+ARG username
+ARG uid
+
 ENV JAVA_HOME /usr/lib/jvm/java-11-openjdk-amd64
 ADD https://git.io/coursier-cli /usr/bin/cs
 
@@ -49,11 +52,11 @@ RUN apt-get -y update && apt-get install -y curl gnupg software-properties-commo
             sbt \
     && rm -rf /var/lib/apt/lists/* \
     # Change the lines below to match your user
-    && mkdir -p /home/josiah/.emacs.d \
-    && mkdir -p /home/josiah/.doom.d \
-    && mkdir -p /home/josiah/.local/share/coursier/bin \
-    && useradd -u 1000 josiah \
-    && chown -R josiah:josiah /home/josiah \
+    && mkdir -p /home/$username/.emacs.d \
+    && mkdir -p /home/$username/.doom.d \
+    && mkdir -p /home/$username/.local/share/coursier/bin \
+    && useradd -u $uid $username \
+    && chown -R $username:$username /home/$username \
     && chmod a+rx /usr/bin/cs \
     && cs bootstrap \
         --java-opt -Xss4m \
@@ -63,29 +66,29 @@ RUN apt-get -y update && apt-get install -y curl gnupg software-properties-commo
         -r bintray:scalacenter/releases \
         -r sonatype:snapshots \
         -o /usr/local/bin/metals-emacs -f -v -v -v \
-    && cs install bloop --only-prebuilt=true --user-home /home/josiah/ \
-    && chown -R josiah:josiah /home/josiah \
+    && cs install bloop --only-prebuilt=true --user-home /home/$username/ \
+    && chown -R $username:$username /home/$username \
     && rm -f /usr/bin/cs
 
-USER josiah
+USER $username
 ENV JAVA_HOME /usr/lib/jvm/java-11-openjdk-amd64
 
-RUN cd /home/josiah \
+RUN cd /home/$username \
     && git clone https://github.com/powerline/fonts.git \
     && cd fonts && chmod +x install.sh && ./install.sh \
     && cd .. && rm -rf ./fonts \
     && git clone https://github.com/ryanoasis/nerd-fonts && cd nerd-fonts \
     && chmod +x install.sh && ./install.sh && cd .. && rm -rf nerd-fonts \
-    && export PATH="$PATH:/home/josiah/.local/share/coursier/bin" \
-    && echo PATH="$PATH:/home/josiah/.local/share/coursier/bin" | tee -a ~/.bashrc ~/.shrc \
-    && git clone --depth 1 https://github.com/hlissner/doom-emacs /home/josiah/.emacs.d \
-    && /home/josiah/.emacs.d/bin/doom env help
+    && export PATH="$PATH:/home/$username/.local/share/coursier/bin" \
+    && echo PATH="$PATH:/home/$username/.local/share/coursier/bin" | tee -a ~/.bashrc ~/.shrc \
+    && git clone --depth 1 https://github.com/hlissner/doom-emacs /home/$username/.emacs.d \
+    && /home/$username/.emacs.d/bin/doom env help
 
-COPY config.el /home/josiah/.doom.d/config.el
-COPY init.el /home/josiah/.doom.d/init.el
-COPY packages.el /home/josiah/.doom.d/packages.el
-COPY custom.el /home/josiah/.doom.d/custom.el
+COPY config.el /home/$username/.doom.d/config.el
+COPY init.el /home/$username/.doom.d/init.el
+COPY packages.el /home/$username/.doom.d/packages.el
+COPY custom.el /home/$username/.doom.d/custom.el
 
-RUN /home/josiah/.emacs.d/bin/doom -y sync
+RUN /home/$username/.emacs.d/bin/doom -y sync
 
 CMD ["emacs"]
