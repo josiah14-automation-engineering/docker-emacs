@@ -3,6 +3,8 @@ FROM ubuntu:20.04
 
 ARG username
 ARG uid
+ARG fullname
+ARG email
 
 ENV JAVA_HOME /usr/lib/jvm/java-11-openjdk-amd64
 ADD https://git.io/coursier-cli /usr/bin/cs
@@ -89,6 +91,8 @@ COPY init.el /home/$username/.doom.d/init.el
 COPY packages.el /home/$username/.doom.d/packages.el
 COPY custom.el /home/$username/.doom.d/custom.el
 
-RUN /home/$username/.emacs.d/bin/doom -y sync
+RUN sed -i "s/<full-name>/\"$fullname\"/" /home/$username/.doom.d/config.el \
+    && sed -i "s/<email-address>/\"$email\"/" /home/$username/.doom.d/config.el \
+    && /home/$username/.emacs.d/bin/doom -y sync
 
 CMD ["emacs"]
