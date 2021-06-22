@@ -28,6 +28,8 @@ still under development.*
    docker build \
    --build-arg username=$USER \
    --build-arg uid=$UID \
+   --build-arg fullname="Jane Doe" \
+   --build-arg email="jane.doe@email.com" \
    -t josiah14/emacs:27.2-ubuntu-20.04 \
    .
    ```
