@@ -1,4 +1,4 @@
-FROM josiah14/emacs:27.2-ubuntu20.04-dev
+FROM josiah14/emacs:28.1-ubuntu20.04-dev
 FROM ubuntu:20.04
 
 ARG username
@@ -11,7 +11,6 @@ ADD https://git.io/coursier-cli /usr/bin/cs
 
 COPY --from=0 /usr/local /usr/local
 
-# RUN mkdir -p /root/.doom.d/
 RUN apt-get -y update && apt-get install -y curl gnupg software-properties-common \
     && add-apt-repository ppa:git-core/ppa \
     && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" \
@@ -33,6 +32,8 @@ RUN apt-get -y update && apt-get install -y curl gnupg software-properties-commo
             libasound2 \
             libcanberra-gtk3-module \
             libdbus-1-3 \
+            libgccjit0 \
+            libgccjit-10-dev \
             libgif7 \
             libgnutls30 \
             libgtk-3-0 \
@@ -53,9 +54,9 @@ RUN apt-get -y update && apt-get install -y curl gnupg software-properties-commo
             openjdk-11-jre-headless \
             sbt \
     && rm -rf /var/lib/apt/lists/* \
-    # Change the lines below to match your user
     && mkdir -p /home/$username/.emacs.d \
     && mkdir -p /home/$username/.doom.d \
+    && mkdir -p /home/$username/.local/share/fonts \
     && mkdir -p /home/$username/.local/share/coursier/bin \
     && useradd -u $uid $username \
     && chown -R $username:$username /home/$username \
@@ -64,7 +65,7 @@ RUN apt-get -y update && apt-get install -y curl gnupg software-properties-commo
         --java-opt -Xss4m \
         --java-opt -Xms100m \
         --java-opt -Dmetals.client=emacs \
-        org.scalameta:metals_2.12:0.10.4 \
+        org.scalameta:metals_2.12:0.11.2 \
         -r bintray:scalacenter/releases \
         -r sonatype:snapshots \
         -o /usr/local/bin/metals-emacs -f -v -v -v \
@@ -83,9 +84,10 @@ RUN cd /home/$username \
     && chmod +x install.sh && ./install.sh && cd .. && rm -rf nerd-fonts \
     && export PATH="$PATH:/home/$username/.local/share/coursier/bin" \
     && echo PATH="$PATH:/home/$username/.local/share/coursier/bin" | tee -a ~/.bashrc ~/.shrc \
-    && git clone --depth 1 https://github.com/hlissner/doom-emacs /home/$username/.emacs.d \
-    && /home/$username/.emacs.d/bin/doom env help
+    && git clone --depth 1 https://github.com/hlissner/doom-emacs /home/$username/.emacs.d
 
+# This is done down here so that the Doom Emacs configuration can be more easily changed without
+# the need to re-clone Doom and re-install the fonts, which takes a long time.
 COPY config.el /home/$username/.doom.d/config.el
 COPY init.el /home/$username/.doom.d/init.el
 COPY packages.el /home/$username/.doom.d/packages.el
@@ -93,6 +95,7 @@ COPY custom.el /home/$username/.doom.d/custom.el
 
 RUN sed -i "s/<full-name>/\"$fullname\"/" /home/$username/.doom.d/config.el \
     && sed -i "s/<email-address>/\"$email\"/" /home/$username/.doom.d/config.el \
-    && /home/$username/.emacs.d/bin/doom -y sync
+    && /home/$username/.emacs.d/bin/doom env --help \
+    && /home/$username/.emacs.d/bin/doom sync
 
 CMD ["emacs"]

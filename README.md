@@ -14,6 +14,8 @@ for the Scala Mode are under the [Space]-m shortcut.
 |------------------------------|-----------------------|-------|------------------------|-------------------------------------------------|
 | [Ubuntu](https://ubuntu.com) | 27.2-ubuntu-20.04     | 3.59G | 27.2-ubuntu-20.04-dev  | Emacs, curl, gnupg & imagemagick                |
 | [Ubuntu](https://ubuntu.com) | 27.2-ubuntu-20.04-dev | 1.83G | ubuntu:20.04           | All build dependencies & source in `/opt/emacs` |
+| [Ubuntu](https://ubuntu.com) | 28.1-ubuntu-20.04     | 3.71G | 28.1-ubuntu-20.04-dev  | Emacs, curl, gnupg & imagemagick                |
+| [Ubuntu](https://ubuntu.com) | 28.1-ubuntu-20.04-dev | 1.91G | ubuntu:20.04           | All build dependencies & source in `/opt/emacs` |
 
 *Other versions not found in the above chart are not functional/ready and are
 still under development.*
@@ -22,7 +24,7 @@ still under development.*
 
 ## To Build the Container
 
-1. `cd` to `./27.2/ubuntu/20.04/`
+1. `cd` to `./28.1/ubuntu/20.04/`
 1. run the following command from your shell:
    ```bash
    docker build \
@@ -30,7 +32,7 @@ still under development.*
    --build-arg uid=$UID \
    --build-arg fullname="Jane Doe" \
    --build-arg email="jane.doe@email.com" \
-   -t josiah14/emacs:27.2-ubuntu-20.04 \
+   -t <your dockerhub username>/emacs:28.1-ubuntu-20.04 \
    .
    ```
 1. Grab a Snickers and find something else to do, it's going to be a bit.
@@ -40,7 +42,7 @@ still under development.*
 ### Console
 
 ``` shell
-docker run -it --rm josiah14/emacs:27.2-ubuntu-20.04
+docker run -it --rm <your dockerhub username>/emacs:28.1-ubuntu-20.04
 ```
 
 ### GUI
@@ -48,7 +50,7 @@ docker run -it --rm josiah14/emacs:27.2-ubuntu-20.04
 ``` shell
 docker run -it --rm -e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v <absolute-src-path-of-your-code-directory>:<absolute-dest-path-of-your-code-directory> \
-  josiah14/emacs:27.2-ubuntu-20.04
+  <your dockerhub username>/emacs:28.1-ubuntu-20.04
 ```
 
 ## On first boot of Doom Emacs from this image/container
@@ -65,6 +67,8 @@ automate through the Dockerfile. They are relatively minor steps, but still need
 1. Doom also has an issue where not all of the font symbols/icons it uses can be imported (as far as I can tell) from
    things like Nerd Fonts or Powerline Fonts. It has some special requirements that can be installed via a command
    in the Doom Emacs editor: `all-the-icons-install-fonts`. I learned about this [here](https://github.com/hlissner/doom-emacs/issues/724).
+1. Commit the container to an image (I would recommend a new image name so that you can always go back to the original
+   and work off of it if you need to).
 1. Now, once the above steps are completed, commit the current container to a
    Docker repo and tag of your choosing and everything should work fine on the next boot.
    You won't have to wait for the editor to perform the font and unicode mapping, and
