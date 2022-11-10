@@ -33,7 +33,7 @@ still under development.*
    --build-arg fullname="Jane Doe" \
    --build-arg email="jane.doe@email.com" \
    --build-arg jha_artifactory_api_key="${JHA_ARTIFACTORY_API_KEY}" \
-   -t <your dockerhub username>/emacs:28.1-ubuntu-20.04_47deg \
+   -t emacs:28.1-ubuntu-20.04_47deg \
    .
    ```
 1. Grab a Snickers and find something else to do, it's going to be a bit.
