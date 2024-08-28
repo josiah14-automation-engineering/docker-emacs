@@ -3,12 +3,16 @@ FROM alpine:edge
 # autoconf, automake, and libtool make up Ubuntu autotools
 # alsa-lib replaces libasound2
 # tiff replaces libotf
+# gawk replaces awk because regular awk breaks the gcc compilation
 RUN apk add autoconf \
     automake \
     libtool \
     build-base \
     alpine-sdk \
     curl \
+    dpkg \
+    dpkg-dev \
+    gawk \
     git \
     gnupg \
     libgccjit \
@@ -16,7 +20,6 @@ RUN apk add autoconf \
     gcc \
     imagemagick \
     imagemagick-dev \
-    imagemagick-c++ \
     iputils-ping \
     aspell \
     aspell-dev \
@@ -25,7 +28,6 @@ RUN apk add autoconf \
     alsa-lib \
     alsa-lib-dev \
     libcanberra-gtk3 \
-    libcanberra-alsa \
     libcanberra-dev \
     dbus-libs \
     dbus-dev \
@@ -34,8 +36,8 @@ RUN apk add autoconf \
     gnutls \
     gnutls-dev \
     gpm \
-    gpm-libs\
-    gpm-dev\
+    gpm-libs \
+    gpm-dev \
     gtk+3.0 \
     gtk+3.0-dev \
     jansson \
@@ -65,6 +67,25 @@ RUN apk add autoconf \
     libxaw3d \
     libxaw3d-dev \
     zlib \
-    zlib-dev
+    zlib-dev \
+ && rm -rf /var/cache/apk/*
 
-CMD ["/bin/bash"]
+RUN git clone --depth 1 --branch emacs-29.2 git://git.savannah.gnu.org/emacs.git /opt/emacs && \
+    cd /opt/emacs && \
+    ./autogen.sh && \
+    ./configure --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+                --with-modules --with-gnutls --with-json --with-rsvg --with-xml2 --with-wide-int \
+                CFLAGS="-O3 -freciprocal-math -fassociative-math -frename-registers -funroll-loops -mtune=native -march=native -floop-parallelize-all -ftree-parallelize-loops=4" && \
+    make -j"$(nproc)" && \
+    make install && cd .. && rm -rf ./emacs
+
+RUN mkdir -p /root/.emacs.d/elpa/gnupg && \
+    chmod 700 /root/.emacs.d/elpa/gnupg && \
+    for i in {1..3}; do \
+      gpg --keyserver keys.gnupg.net \
+          --homedir /root/.emacs.d/elpa/gnupg \
+          --recv-keys 066DAFCB81E42C40 \
+      && break || sleep 15; \
+    done
+
+CMD ["emacs"]
