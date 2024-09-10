@@ -73,9 +73,11 @@ RUN apk add autoconf \
 RUN git clone --depth 1 --branch emacs-29.2 git://git.savannah.gnu.org/emacs.git /opt/emacs && \
     cd /opt/emacs && \
     ./autogen.sh && \
-    ./configure --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+    ./configure --without-pop --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
                 --with-modules --with-gnutls --with-json --with-rsvg --with-xml2 --with-wide-int \
-                CFLAGS="-O3 -freciprocal-math -fassociative-math -frename-registers -funroll-loops -mtune=native -march=native -floop-parallelize-all -ftree-parallelize-loops=4" && \
+                --with-cairo --with-harfbuzz --with-png --with-tiff --with-gif \
+                CFLAGS="-O3 -pipe -flto -freciprocal-math -fassociative-math -frename-registers -funroll-loops -mtune=cortex-a72 -mcpu=cortex-a72+crc -floop-parallelize-all -ftree-parallelize-loops=4" && \
+                LDFLAGS="-Wl,-O1 -Wl,--as-needed -flto" && \
     make -j"$(nproc)" && \
     make install && cd .. && rm -rf ./emacs
 
