@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM ubuntu:22.04
 
 RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
     DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get install -y \
@@ -24,7 +24,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
             git \
             gnupg \
             libgccjit0 \
-            libgccjit-13-dev \
+            libgccjit-11-dev \
             gcc-10 \
             imagemagick \
             libmagickwand-dev \
