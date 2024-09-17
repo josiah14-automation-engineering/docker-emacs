@@ -6,8 +6,8 @@
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
-(setq user-full-name <full-name>
-      user-mail-address <email-address>)
+(setq user-full-name "Josiah Berkebile"
+      user-mail-address "josiah.berkebile@protonmail.com")
 
 ;; Doom exposes five (optional) variables for controlling fonts in Doom. Here
 ;; are the three important ones:
@@ -85,6 +85,11 @@
  (:leader
   (:prefix "b"
    :desc "Flycheck buffer" :n "c" #'flycheck-buffer)))
+
+;; Use haskell-language-server-wrapper for LSP
+(after! lsp-mode
+  (setq lsp-haskell-server-path "haskell-language-server-wrapper")
+  (add-hook 'haskell-mode-hook #'lsp))
 
 ;;(map!
 ;; :leader
