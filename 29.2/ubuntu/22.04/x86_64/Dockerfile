@@ -72,8 +72,6 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
 # current user during the build of the container.
 RUN userdel --remove ubuntu || true \
     && mkdir -p /home/$username/.config/emacs \
-    && mkdir -p /home/$username/.emacs.d \
-    && mkdir -p /home/$username/.doom.d \
     && mkdir -p /home/$username/.local/share/fonts \
     && useradd -u $uid $username \
     && chown -R $username:$username /home/$username
@@ -92,7 +90,8 @@ RUN cd /home/$username \
     && fc-cache -fv
 
 RUN git clone --depth 1 https://github.com/hlissner/doom-emacs /home/$username/.config/emacs \
-    && /home/$username/.config/emacs/bin/doom install --help \
-    && /home/$username/.config/emacs/bin/doom install -! -D --aot; cat /tmp//doom.47.0.sh
+    && cd /home/$username/.config/emacs && git reset --hard 2e5307e4259281d1a233fb1bc99975d528650d53 \
+    && /home/$username/.config/emacs/bin/doom install -! --aot --fonts \
+    && /home/$username/.config/emacs/bin/doom sync -! -u -j "$(nproc)" --aot --gc
 
 CMD ["emacs"]
