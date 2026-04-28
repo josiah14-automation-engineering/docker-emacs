@@ -10,7 +10,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
             curl \
             dpkg-dev \
             gawk \
-            gcc-14 \
+            gcc \
             git \
             gnupg \
             imagemagick \
@@ -21,7 +21,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
             libcanberra-gtk3-module \
             libdbus-1-dev \
             libgccjit0 \
-            libgccjit-14-dev \
+            libgccjit-13-dev \
             libgif-dev \
             libgnutls28-dev \
             libgpm-dev \
@@ -83,8 +83,8 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
             git \
             gnupg \
             libgccjit0 \
-            libgccjit-14-dev \
-            gcc-14 \
+            libgccjit-13-dev \
+            gcc \
             imagemagick \
             libmagickwand-dev \
             libmagickcore-dev \
@@ -145,9 +145,28 @@ ARG USERNAME=developer
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-RUN mkdir -p "/etc/sudoers.d" \
- && groupadd --gid "${USER_GID}" "${USERNAME}" \
- && useradd --uid "${USER_UID}" --gid "${USER_GID}" -m "${USERNAME}" \
+# delete the default ubuntu user and group, then create the runtime user
+# which matches the host system's user for running emacs GUI without elevated
+# privileges
+RUN set -eux \
+ && mkdir -p "/etc/sudoers.d" \
+ && if id -u ubuntu >/dev/null 2>&1; then \
+      userdel --remove ubuntu; \
+    fi; \
+    if getent group ubuntu >/dev/null; then \
+      groupdel ubuntu; \
+    fi \
+ && if getent group "${USER_GID}" >/dev/null; then \
+      EXISTING_GROUP="$(getent group "${USER_GID}" | cut -d: -f1)"; \
+    else \
+      groupadd --gid "${USER_GID}" "${USERNAME}"; \
+      EXISTING_GROUP="${USERNAME}"; \
+    fi \
+ && if id -u "${USER_UID}" >/dev/null 2>&1; then \
+      echo "User with UID ${USER_UID} already exists"; \
+    else \
+      useradd --uid "${USER_UID}" --gid "${USER_GID}" -m "${USERNAME}"; \
+    fi \
  && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${USERNAME}" \
  && chmod 0440 "/etc/sudoers.d/${USERNAME}"
 
