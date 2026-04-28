@@ -62,16 +62,16 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # RUN git clone --depth 1 --branch "${EMACS_VERSION}" https://git.savannah.gnu.org/git/emacs.git /opt/emacs && \
-RUN git clone --depth 1 --branch emacs-29.2 git://git.savannah.gnu.org/emacs.git /opt/emacs && \
-    cd /opt/emacs && \
-    ./autogen.sh && \
-    ./configure --without-pop --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+RUN git clone --depth 1 --branch emacs-29.2 git://git.savannah.gnu.org/emacs.git /opt/emacs \
+ && cd /opt/emacs \
+ && ./autogen.sh \
+ && ./configure --without-pop --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
                 --with-modules --with-gnutls --with-json --with-rsvg --with-xml2 --with-wide-int \
                 --with-cairo --with-harfbuzz --with-png --with-tiff --with-gif --enable-link-time-optimization \
-                CFLAGS="-O2 -pipe -mtune=skylake -march=skylake" && \
-                LDFLAGS="-Wl,-O1 -Wl,--as-needed" && \
-    make -j"$(( $(nproc) - 1 ))" V=1 && \
-    make install
+                CFLAGS="-O2 -pipe -mtune=skylake -march=skylake" \
+                LDFLAGS="-Wl,-O1 -Wl,--as-needed" \
+ && make -j"$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" V=1 \
+ && make install
 
 RUN mkdir -p "/root/.emacs.d/elpa/gnupg" && \
     chmod 700 "/root/.emacs.d/elpa/gnupg" && \
