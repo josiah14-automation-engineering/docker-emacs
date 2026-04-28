@@ -1,65 +1,6 @@
 FROM ubuntu:24.04
 
 RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
-    DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-cache policy \
-            autoconf \
-            automake \
-            autotools-dev \
-            build-essential \
-            ca-certificates \
-            curl \
-            dpkg-dev \
-            gawk \
-            gcc \
-            git \
-            gnupg \
-            imagemagick \
-            iputils-ping \
-            ispell \
-            libacl1-dev \
-            libasound2-dev \
-            libcanberra-gtk3-module \
-            libdbus-1-dev \
-            libgccjit0 \
-            libgccjit-13-dev \
-            libgif-dev \
-            libgnutls28-dev \
-            libgpm-dev \
-            libgtk-3-dev \
-            libjansson-dev \
-            libjpeg-dev \
-            liblcms2-dev \
-            liblockfile-dev \
-            libm17n-dev \
-            libmagick++-6.q16-dev \
-            libmagickcore-dev \
-            libmagickwand-dev \
-            libncurses-dev \
-            libotf-dev \
-            libpng-dev \
-            librsvg2-dev \
-            libseccomp-dev \
-            libselinux1-dev \
-            libsqlite3-dev \
-            libtiff-dev \
-            libtool \
-            libtree-sitter-dev \
-            libwebp-dev \
-            libwebkit2gtk-4.1-dev \
-            libx11-dev \
-            libx11-xcb-dev \
-            libxaw7-dev \
-            libxcb-shape0-dev \
-            libxcb1-dev \
-            libxft-dev \
-            libxml2-dev \
-            openssh-client \
-            sudo \
-            texinfo \
-            valgrind \
-            wget \
-            xaw3dg-dev \
-            zlib1g-dev && \
     DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get install -y \
             libwebp-dev \
             libtree-sitter-dev \
