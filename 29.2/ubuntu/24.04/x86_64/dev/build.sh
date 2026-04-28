@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
 docker build . -t josiah14/emacs:29.2-skylake-ubuntu-24.04-dev \
   --build-arg USERNAME="${USER}" \
