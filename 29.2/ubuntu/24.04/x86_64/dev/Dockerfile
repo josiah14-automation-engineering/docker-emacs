@@ -105,7 +105,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
             liblockfile-dev \
             libm17n-dev \
             libmagick++-6.q16-dev \
-            libncurses5-dev \
+            libncurses-dev \
             libotf-dev \
             libpng-dev \
             librsvg2-dev \
