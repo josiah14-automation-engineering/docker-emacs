@@ -158,15 +158,16 @@ RUN set -eux \
     fi \
  && if getent group "${USER_GID}" >/dev/null; then \
       EXISTING_GROUP="$(getent group "${USER_GID}" | cut -d: -f1)"; \
-    else \
-      groupadd --gid "${USER_GID}" "${USERNAME}"; \
-      EXISTING_GROUP="${USERNAME}"; \
+      if [ "${EXISTING_GROUP}" != "${USERNAME}" ]; then \
+        groupdel "${EXISTING_GROUP}"; \
+      fi; \
     fi \
+ && groupadd --gid "${USER_GID}" "${USERNAME}" \
  && if id -u "${USER_UID}" >/dev/null 2>&1; then \
-      echo "User with UID ${USER_UID} already exists"; \
-    else \
-      useradd --uid "${USER_UID}" --gid "${USER_GID}" -m "${USERNAME}"; \
+      echo "UID ${USER_UID} is still occupied after deleting ubuntu"; \
+      exit 1; \
     fi \
+ && useradd --uid "${USER_UID}" --gid "${USER_GID}" -m "${USERNAME}" \
  && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${USERNAME}" \
  && chmod 0440 "/etc/sudoers.d/${USERNAME}"
 
