@@ -200,7 +200,8 @@ RUN cd /home/${USERNAME} \
 RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
     && cd /home/${USERNAME}/.config/emacs && git fetch --all && git reset --hard 4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57 \
     && /home/${USERNAME}/.config/emacs/bin/doom install -! --aot \
-    && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
+    && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc \
+    && /home/${USERNAME}/.config/emacs/bin/doom fonts install
 
 # Config files are copied after the expensive doom install + sync steps so that
 # changes to config alone only invalidate the last two layers.
