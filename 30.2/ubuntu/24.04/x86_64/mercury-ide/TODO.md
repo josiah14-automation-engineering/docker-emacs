@@ -17,6 +17,26 @@ Once the full Mercury IDE image is working (custom Doom config, mercury-mode, fl
 
 ---
 
+## Long-horizon idea: Mercury LSP server
+
+No Mercury LSP server currently exists. Building one would be genuinely valuable to the Mercury community and a natural fit for the polyparadigm project's "contribute back" ethos. Four options in ascending order of effort:
+
+**1. Tree-sitter based LSP** (~1-3 months, Mercury-proficient)
+Build on a Mercury tree-sitter grammar (write one if it doesn't exist). Provides syntax-based features: folding, symbol navigation, basic completion from visible declarations. No type, mode, or determinism information. Good starting point.
+
+**2. mmc wrapper** (~1-3 months, Mercury-proficient)
+Shell out to `mmc` and parse its output. Diagnostics are already handled by flycheck — the incremental work is go-to-definition and completion by parsing Mercury's `.int` interface files and module declarations. The ceiling is low (no semantic analysis) and parsing mmc's text output is fragile since there's no stable machine-readable format.
+
+**3. Shallow standalone parser** (~2-4 months, Mercury-proficient)
+Parse Mercury syntax independently, provide go-to-definition by name lookup across modules, completion from declarations. Ignores modes and types. Fragile at module system boundaries.
+
+**4. Deep compiler integration** (~6-12+ months, requires Mercury compiler expertise)
+The correct long-term approach. Modify `mmc` to expose an API or run in a persistent server mode, providing real type/mode/determinism information — analogous to what GHC did with GHCi → HLS. Requires deep knowledge of Mercury's HLDS internals. Not viable until well into the Mercury learning track.
+
+Prerequisite for any option: become sufficiently proficient in Mercury first.
+
+---
+
 ## Report Mercury compiler bug: profdeep grade fails on parallel conjunctions
 
 File a bug report with the Mercury project at https://bugs.mercurylang.org/

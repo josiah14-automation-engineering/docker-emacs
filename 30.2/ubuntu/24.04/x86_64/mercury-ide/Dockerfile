@@ -202,18 +202,17 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
     && /home/${USERNAME}/.config/emacs/bin/doom install -! --aot \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
-# This is done down here so that the Doom Emacs configuration can be more easily changed without
-# the need to re-clone Doom and re-install the fonts, which takes a long time.
-# COPY --chown=${USERNAME}:${USERNAME} config.el /home/${USERNAME}/.config/doom/config.el
-# COPY --chown=${USERNAME}:${USERNAME} init.el /home/${USERNAME}/.config/doom/init.el
-# COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
+# Config files are copied after the expensive doom install + sync steps so that
+# changes to config alone only invalidate the last two layers.
+COPY --chown=${USERNAME}:${USERNAME} config.el /home/${USERNAME}/.config/doom/config.el
+COPY --chown=${USERNAME}:${USERNAME} init.el /home/${USERNAME}/.config/doom/init.el
+COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
 
-# RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \
-#     && sed -i "s/<email-address>/\"${EMAIL}\"/" /home/${USERNAME}/.config/doom/config.el \
-#     && git config --global url."http://git.savannah.gnu.org/git/".insteadOf "https://git.savannah.gnu.org/git/" \
-#     && ulimit -n 262144 \
-#     && /home/${USERNAME}/.config/emacs/bin/doom env --help \
-#     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc \
-#     && cd ~
+RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \
+    && sed -i "s/<email-address>/\"${EMAIL}\"/" /home/${USERNAME}/.config/doom/config.el \
+    && git config --global url."http://git.savannah.gnu.org/git/".insteadOf "https://git.savannah.gnu.org/git/" \
+    && ulimit -n 262144 \
+    && /home/${USERNAME}/.config/emacs/bin/doom env \
+    && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
 CMD ["emacs"]
