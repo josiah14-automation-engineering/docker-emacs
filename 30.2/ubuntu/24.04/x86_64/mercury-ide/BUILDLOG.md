@@ -217,3 +217,7 @@ This is exactly why Doom commits are pinned rather than tracking `master`. Doom 
 #### Doom Emacs layer: success
 
 The Doom Emacs layer built and runs correctly. Startup is snappy, syntax highlighting works (confirmed with bash). Nerd Fonts required running `doom fonts install` manually inside a running container, then committing the container state back to the image with `docker commit`. This is a practical workaround — worth considering whether to bake `doom fonts install` directly into the Dockerfile as a RUN step so the fonts are part of the image build rather than a post-build manual step.
+
+#### Base config files incorporated: success
+
+`config.el`, `init.el`, and `packages.el` were uncommented in the Dockerfile and pulled into the image without issues. The `doom env --help` bug (which would have printed help text instead of generating the env file) was fixed to `doom env` at this point. Doom loads 213 packages across 59 modules in approximately 0.75 seconds — startup is fast.

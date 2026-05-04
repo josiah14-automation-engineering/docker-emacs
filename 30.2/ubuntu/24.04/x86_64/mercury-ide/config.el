@@ -58,15 +58,15 @@
 ;; DEFAULT MAPPINGS
 ;;
 ;; Evil Normal Mode:
-;; gd - lsp-find-definition
-;; gD - lsp-find-references
-;; K  - lsp-describe-thing-at-point
+;; gd  - +lookup/definition (dumb-jump fallback, no LSP)
+;; gD  - +lookup/references
+;; K   - +lookup/documentation
 ;; gcc - comment line
-;; gc - comment region/selection
-;; Spc-c-r - rename all occurences of symbol under cursor
-;; Scc-o-p - Open Treemacs project file navigation sidebar
-;; Scc-o-P - Open Treemacs project file navigation sidebar without switching
-;;           focus to it
+;; gc  - comment region/selection
+;; SPC c r   - rename all occurrences of symbol under cursor
+;; SPC o p   - Open Treemacs project file navigation sidebar
+;; SPC o P   - Open Treemacs project file navigation sidebar without switching
+;;             focus to it
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (map!
  :desc "Move the cursor to new COUNT-th window left of the current one" :n "C-h" #'evil-window-left
