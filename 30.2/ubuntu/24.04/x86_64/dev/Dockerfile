@@ -65,7 +65,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
 RUN git clone --depth 1 --branch emacs-30.2 git://git.savannah.gnu.org/emacs.git /opt/emacs \
  && cd /opt/emacs \
  && ./autogen.sh \
- && ./configure --without-pop --with-native-compilation --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+ && ./configure --without-pop --with-native-compilation=aot --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
                 --with-modules --with-gnutls --with-json --with-rsvg --with-xml2 --with-wide-int --with-tree-sitter \
                 --with-cairo --with-harfbuzz --with-png --with-tiff --with-gif --enable-link-time-optimization \
                 CFLAGS="-O2 -pipe -mtune=skylake -march=skylake" \
