@@ -1,8 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-docker build . --ulimit nofile=262144:262144 -t josiah14/mercury-doom-emacs-ide:29.2-skylake-ubuntu-22.04 \
-  --build-arg username="${USER}" \
-  --build-arg uid="${UID}" \
-  --build-arg guid="${GID}" \
-  --build-arg fullname="<full-name>" \
-  --build-arg email="<email-address>"
+docker build . \
+  --ulimit nofile=262144:262144 \
+  -t josiah14/mercury-doom-emacs-ide:30.2-skylake-ubuntu-24.04 \
+  --build-arg USERNAME="${USER}" \
+  --build-arg USER_UID="$(id -u)" \
+  --build-arg USER_GID="$(id -g)" \
+  --build-arg FULLNAME="<full-name>" \
+  --build-arg EMAIL="<email-address>"
