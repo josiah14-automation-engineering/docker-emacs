@@ -56,18 +56,6 @@ counterparts were already present in the package list).
 
 ---
 
-## IDE image: pin and verify font installation
-
-Two issues with the current font installation:
-
-1. **Powerline fonts are unversioned** — `git clone https://github.com/powerline/fonts.git` has no commit pin. The installed fonts can change silently between builds. Pin to a specific commit for reproducibility.
-
-2. **Source Code Pro has no integrity check** — downloaded by tag via `wget` with no checksum. Mercury gets sha512 verified; fonts should too.
-
-Note: `doom fonts install` does not exist as a CLI subcommand at the pinned Doom commit. Nerd Font / all-the-icons installation remains a manual post-boot step via `M-x all-the-icons-install-fonts`.
-
----
-
 ## Pin all Emacs packages via straight.el lockfile
 
 Now that the image builds successfully, the next prerequisite is wiring up mercury-mode and flycheck before freezing package versions — packages may change once the Mercury-specific config is active. Steps once that is done:

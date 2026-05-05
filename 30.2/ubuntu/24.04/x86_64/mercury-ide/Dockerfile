@@ -184,11 +184,18 @@ ENV HOME=/home/${USERNAME}
 
 RUN cd /home/${USERNAME} \
     && git clone https://github.com/powerline/fonts.git \
-    && cd fonts && chmod +x install.sh && ./install.sh \
+    && cd fonts \
+    && git checkout a029626780dd4af32f15a3e708a5b00528c22f1d \
+    && chmod +x install.sh && ./install.sh \
     && cd .. && rm -rf ./fonts \
     && mkdir -p /home/${USERNAME}/.local/share/fonts/truetype/source-code-pro \
-    && wget -qO- https://github.com/adobe-fonts/source-code-pro/archive/refs/tags/variable-fonts.tar.gz \
-         | tar xz --strip-components=1 -C ~/.local/share/fonts/truetype/source-code-pro \
+    && wget -q https://github.com/adobe-fonts/source-code-pro/archive/refs/tags/variable-fonts.tar.gz \
+         -O /tmp/source-code-pro.tar.gz \
+    && echo "2c55c413bab7d51f252659c63ba65624653dd03c1c64f0c16ece6973e5ae9a821e3675e04bbace263ceeaf71875538197071018761e00351359c876d7ad89fd6  /tmp/source-code-pro.tar.gz" \
+         | sha512sum -c - \
+    && tar xz --strip-components=1 -C ~/.local/share/fonts/truetype/source-code-pro \
+         -f /tmp/source-code-pro.tar.gz \
+    && rm /tmp/source-code-pro.tar.gz \
     && fc-cache -fv
 
 RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \

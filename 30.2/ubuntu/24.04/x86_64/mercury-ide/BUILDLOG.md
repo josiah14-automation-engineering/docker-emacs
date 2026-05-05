@@ -306,6 +306,16 @@ Doom's icon/Nerd Font installation is done from inside a running Emacs instance 
 
 Fix: removed `doom fonts install` from the Dockerfile RUN step. Powerline and Source Code Pro fonts are still installed by the earlier wget/git step. The all-the-icons font installation remains a manual post-boot step (boot container, run `M-x all-the-icons-install-fonts`, `docker commit`).
 
+#### IDE image: font installation pinned and verified
+
+Two reproducibility gaps in the font installation step were closed:
+
+**Powerline fonts** — the `git clone` had no commit pin, so the installed fonts could silently change between builds. Pinned to commit `a029626780dd4af32f15a3e708a5b00528c22f1d` (HEAD at time of writing) by adding `git checkout <commit>` after the clone.
+
+**Source Code Pro** — the download piped directly from `wget` into `tar`, making integrity verification impossible. Restructured to download to a temp file first, verify sha512, then extract. Hash: `2c55c413bab7d51f252659c63ba65624653dd03c1c64f0c16ece6973e5ae9a821e3675e04bbace263ceeaf71875538197071018761e00351359c876d7ad89fd6`
+
+The `variable-fonts` tag in the adobe-fonts/source-code-pro repo is treated as stable; if it is ever moved the sha512 check will catch it and fail the build loudly.
+
 #### IDE image: build success
 
 With the above fixes in place the full image built successfully. The image contains:
