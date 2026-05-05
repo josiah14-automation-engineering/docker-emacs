@@ -7,9 +7,8 @@ ARG USER_GID
 ARG FULLNAME
 ARG EMAIL
 ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
-ARG DOOM_REF=master
+ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
 ARG MERCURY_VERSION=22.01.8
-#ARG DOOM_COMMIT=fdcab58a1b28a3b2bde23789e2a4c9c1391070b6
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -34,7 +33,6 @@ RUN apt-get update -y && \
       automake \
       libtool \
       libffi-dev \
-      libgmp-dev \
       libicu-dev \
       libgmp10 \
       pkg-config \
@@ -85,12 +83,11 @@ RUN apt-get update -y && \
       libm17n-0 \
       libncurses6 \
       libncursesw6 \
-      libncurses-dev \
       libtinfo6 \
       libsm6 \
       libwebpdemux2 \
       libwebp7 \
-      libwebp-dev \
+      libwebpdecoder3 \
       libtree-sitter0 \
       libxext6 \
       librsvg2-2 \
@@ -102,7 +99,6 @@ RUN apt-get update -y && \
       libxaw7 \
       libxcb-util1 \
       zlib1g \
-      zlib1g-dev \
       fonts-dejavu-core \
       adwaita-icon-theme \
       fonts-firacode \
@@ -195,13 +191,10 @@ RUN cd /home/${USERNAME} \
          | tar xz --strip-components=1 -C ~/.local/share/fonts/truetype/source-code-pro \
     && fc-cache -fv
 
-# 0b2ccac00751dfc2f7628b1a2496727633cc3db5
-# fdcab58a1b28a3b2bde23789e2a4c9c1391070b6
 RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
-    && cd /home/${USERNAME}/.config/emacs && git fetch --all && git reset --hard 4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57 \
+    && cd /home/${USERNAME}/.config/emacs && git fetch --all && git reset --hard "${DOOM_COMMIT}" \
     && /home/${USERNAME}/.config/emacs/bin/doom install -! --aot \
-    && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc \
-    && /home/${USERNAME}/.config/emacs/bin/doom fonts install
+    && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
 # Config files are copied after the expensive doom install + sync steps so that
 # changes to config alone only invalidate the last two layers.
