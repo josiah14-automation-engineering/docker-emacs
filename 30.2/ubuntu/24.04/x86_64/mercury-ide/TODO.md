@@ -25,23 +25,6 @@ The following packages in the dev Dockerfile apt list have no role in building E
 
 ---
 
-## Pin all Emacs packages via straight.el lockfile
-
-Mercury-mode and flycheck are now wired in and the image builds successfully — package versions are stable enough to freeze. Steps:
-
-1. Run a container from the completed image
-2. Inside Emacs, run `M-x straight-freeze-versions` — generates `~/.config/emacs/straight/versions/default.el` with the exact commit hash of every installed package
-3. Copy that file out of the container and commit it to the repo as `straight-versions.el`
-4. Add to the Dockerfile (before `doom sync`):
-   ```dockerfile
-   COPY --chown=${USERNAME}:${USERNAME} straight-versions.el \
-        /home/${USERNAME}/.config/emacs/straight/versions/default.el
-   ```
-
-**Why:** The Doom commit pin covers Doom's own packages, but user-declared packages in `packages.el` and any packages Doom leaves unpinned can still drift. The lockfile freezes everything.
-
----
-
 ## Long-horizon idea: Mercury LSP server
 
 No Mercury LSP server currently exists. Building one would be genuinely valuable to the Mercury community and a natural fit for the polyparadigm project's "contribute back" ethos. Four options in ascending order of effort:

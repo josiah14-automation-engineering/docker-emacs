@@ -225,12 +225,14 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
     && /home/${USERNAME}/.config/emacs/bin/doom install -! --aot \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
-# Config files are copied after the expensive doom install + sync steps so that
-# changes to config alone only invalidate the last two layers.
+# Config and lockfile are copied after the expensive doom install + sync steps so
+# that changes to these files only invalidate the last two layers.
 COPY --chown=${USERNAME}:${USERNAME} config.el   /home/${USERNAME}/.config/doom/config.el
 COPY --chown=${USERNAME}:${USERNAME} init.el     /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
 COPY --chown=${USERNAME}:${USERNAME} mercury.el  /home/${USERNAME}/.config/doom/mercury.el
+COPY --chown=${USERNAME}:${USERNAME} straight-versions.el \
+     /home/${USERNAME}/.config/emacs/.local/straight/versions/default.el
 
 RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \
     && sed -i "s/<email-address>/\"${EMAIL}\"/" /home/${USERNAME}/.config/doom/config.el \
