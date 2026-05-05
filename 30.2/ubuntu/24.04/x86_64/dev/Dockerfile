@@ -11,7 +11,6 @@ RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
             libx11-xcb-dev \
             libxcb1-dev \
             libxcb-shape0-dev \
-            valgrind \
             libpthread-stubs0-dev \
             gawk \
             libtool \
@@ -67,11 +66,13 @@ RUN git clone --depth 1 --branch emacs-30.2 git://git.savannah.gnu.org/emacs.git
  && ./autogen.sh \
  && ./configure --without-pop --with-native-compilation=aot --build="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
                 --with-modules --with-gnutls --with-json --with-rsvg --with-xml2 --with-wide-int --with-tree-sitter \
-                --with-cairo --with-harfbuzz --with-png --with-tiff --with-gif --enable-link-time-optimization \
+                --with-cairo --with-harfbuzz --with-png --with-tiff --with-gif \
+                --enable-link-time-optimization \
                 CFLAGS="-O2 -pipe -mtune=skylake -march=skylake" \
                 LDFLAGS="-Wl,-O1 -Wl,--as-needed" \
  && make -j"$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" V=1 \
- && make install
+ && make install \
+ && rm -rf /opt/emacs
 
 RUN mkdir -p "/root/.emacs.d/elpa/gnupg" && \
     chmod 700 "/root/.emacs.d/elpa/gnupg" && \

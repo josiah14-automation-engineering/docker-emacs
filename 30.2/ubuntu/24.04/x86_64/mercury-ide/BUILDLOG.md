@@ -221,3 +221,101 @@ The Doom Emacs layer built and runs correctly. Startup is snappy, syntax highlig
 #### Base config files incorporated: success
 
 `config.el`, `init.el`, and `packages.el` were uncommented in the Dockerfile and pulled into the image without issues. The `doom env --help` bug (which would have printed help text instead of generating the env file) was fixed to `doom env` at this point. Doom loads 213 packages across 59 modules in approximately 0.75 seconds — startup is fast.
+
+---
+
+### 2026-05-04
+
+#### Dev image: source tree removed after install
+
+After `make install` completes, the full Emacs source tree in `/opt/emacs` was left in the image — the clone, all generated C files, and the build artifacts. The multi-stage build only copies `/usr/local` into the IDE image, but the dev image itself is pushed independently and was carrying several hundred MB of dead weight. Fix: append `&& rm -rf /opt/emacs` to the end of the build RUN step. The cleanup runs in the same layer as the install, so the source never lands in the image.
+
+#### Dev image: valgrind removed from build dependencies
+
+`valgrind` was in the apt install list with no justification — nothing in the Emacs build or the dev image's purpose requires a memory debugger. Removed.
+
+#### Dev image: xwidgets support attempted — blocked by WebKit version ceiling
+
+`libwebkit2gtk-4.1-dev` was already installed as a build dependency but `--with-xwidgets` was absent from the configure flags. Added `--with-xwidgets` to attempt enabling Emacs's embedded browser widget. Build failed at configure:
+
+```
+checking for webkit2gtk-4.1 >= 2.12 webkit2gtk-4.1 < 2.41.92... no
+checking for webkit2gtk-4.0 >= 2.12 webkit2gtk-4.0 < 2.41.92... no
+configure: error: xwidgets requested but WebKitGTK+ or WebKit framework not found.
+```
+
+Emacs 30.2's xwidgets configure check enforces an upper bound of `< 2.41.92`. Ubuntu 24.04 ships `libwebkit2gtk-4.1` at version 2.44.x, which exceeds that ceiling. The check is a deliberate API compatibility guard — not a missing package — so there is no install-side workaround. Patching the configure script is possible but fragile and not worth the maintenance cost.
+
+Resolution: reverted `--with-xwidgets`. `libwebkit2gtk-4.1-dev` remains in the apt list as a build dependency since it may still satisfy other configure probes. Xwidgets support is a candidate to revisit when upgrading to an Emacs release that has updated its WebKit version bounds.
+
+#### IDE image: doom fonts install baked into the build
+
+The previous workaround for Nerd Font installation — running `doom fonts install` interactively inside a running container and committing the result with `docker commit` — has been replaced with a proper build step. `doom fonts install` runs through the Doom CLI in batch mode and requires no display, so it works cleanly as a RUN step.
+
+The call was appended to the end of the existing doom clone/install/sync RUN step. Grouping it there means fonts re-install automatically whenever the Doom commit pin is bumped — the right behavior, since the set of fonts Doom installs is tied to the Doom version.
+
+The downloaded Nerd Font packages should be inspected after the next successful build to determine whether the earlier Powerline and Source Code Pro installation steps remain necessary or can be consolidated.
+
+#### IDE image: DOOM_COMMIT ARG replaces DOOM_REF
+
+The Dockerfile previously declared `ARG DOOM_REF=master` but never used it — the clone step always did `git reset --hard` to a hardcoded commit hash regardless of the ARG value. This was misleading: reading the ARG block implied the Doom version was configurable via `DOOM_REF`, but the actual pinned commit was buried in the middle of a RUN step.
+
+Fix: replaced `DOOM_REF=master` with `DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57` and updated the reset to `git reset --hard "${DOOM_COMMIT}"`. The pin is now visible at the top of the file alongside the other version ARGs, and bumping the commit is a one-line change in a predictable location. The two orphaned hash comments above the RUN step were removed — they were tracking earlier candidate commits and are superseded by the ARG.
+
+---
+
+### 2026-05-05
+
+#### IDE image: unnecessary -dev packages removed
+
+Several `-dev` packages in the apt list had runtime counterparts already present and served no purpose in the final image. Removed:
+
+- `libgmp-dev` — `libgmp10` was already in the list
+- `libncurses-dev` — `libncurses6` and `libncursesw6` were already in the list
+- `libwebp-dev` — `libwebp7` and `libwebpdemux2` were already in the list
+- `zlib1g-dev` — `zlib1g` was already in the list
+
+The remaining `-dev` packages (`libffi-dev`, `libicu-dev`, `libreadline-dev`, `libgccjit-13-dev`) are still needed: the first three are Mercury build-time dependencies that stay until Mercury is isolated into its own build stage, and `libgccjit-13-dev` is required for Emacs native compilation during `doom sync --aot`.
+
+#### Build failure: libwebpdecoder.so.3 missing after libwebp-dev removal
+
+Removing `libwebp-dev` caused the build to fail immediately when Emacs was first invoked:
+
+```
+emacs: error while loading shared libraries: libwebpdecoder.so.3: cannot open shared object file: No such file or directory
+```
+
+`libwebp-dev` had been pulling in `libwebpdecoder3` as a transitive dependency. `libwebp7` and `libwebpdemux2` together do not cover the decoder library — it is a separate package in Ubuntu 24.04. The Emacs binary links against all three: `libwebp.so.7`, `libwebpdemux.so.2`, and `libwebpdecoder.so.3`.
+
+Fix: added `libwebpdecoder3` explicitly to the apt list.
+
+#### doom fonts install does not exist at the pinned Doom commit
+
+With the `libwebpdecoder3` fix in place, the build progressed through the full Mercury two-stage compile and into the Doom Emacs layer. `doom sync` completed successfully, but the final step failed:
+
+```
+Error: unrecognized command: doom fonts install
+
+Similar commands:
+  - (46%) doom install
+```
+
+The 2026-05-04 entry documenting `doom fonts install` as a working baked-in build step was incorrect. The conclusion that it "works cleanly as a RUN step" was based on running the command interactively inside a running container — it was never validated in a full image build from scratch. At the pinned Doom commit (`4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57`), `doom fonts install` is not a recognized CLI subcommand.
+
+Doom's icon/Nerd Font installation is done from inside a running Emacs instance via `M-x all-the-icons-install-fonts`, not through the `doom` CLI. This is already documented in the README as a manual post-build step.
+
+Fix: removed `doom fonts install` from the Dockerfile RUN step. Powerline and Source Code Pro fonts are still installed by the earlier wget/git step. The all-the-icons font installation remains a manual post-boot step (boot container, run `M-x all-the-icons-install-fonts`, `docker commit`).
+
+#### IDE image: build success
+
+With the above fixes in place the full image built successfully. The image contains:
+
+- Emacs 30.2 compiled from source with native compilation, tree-sitter, Cairo/HarfBuzz, and the full Skylake-tuned flag set — copied from the dev image
+- Mercury 22.01.8 compiled from source in two bootstrap stages; both grades installed: `asm_fast.gc.par.stseg` (default) and `asm_fast.gc.par.stseg.debug`
+- Doom Emacs at commit `4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57`, AOT-compiled, with custom `config.el`, `init.el`, and `packages.el` applied
+- Powerline and Source Code Pro fonts installed at build time
+
+Remaining manual post-boot steps before the image is production-ready (per README):
+1. Two unicode mapping passes (let each complete before proceeding)
+2. `M-x all-the-icons-install-fonts` to install Nerd Fonts
+3. `docker commit` the result
