@@ -230,7 +230,8 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
 COPY --chown=${USERNAME}:${USERNAME} config.el   /home/${USERNAME}/.config/doom/config.el
 COPY --chown=${USERNAME}:${USERNAME} init.el     /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
-COPY --chown=${USERNAME}:${USERNAME} mercury.el  /home/${USERNAME}/.config/doom/mercury.el
+COPY --chown=${USERNAME}:${USERNAME} mercury.el      /home/${USERNAME}/.config/doom/mercury.el
+COPY --chown=${USERNAME}:${USERNAME} keybindings.el /home/${USERNAME}/.config/doom/keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} straight-versions.el \
      /home/${USERNAME}/.config/emacs/.local/straight/versions/default.el
 

@@ -88,6 +88,7 @@
 (setq vertico-cycle t) ; enables cycling to key past history into fuzzy-matched commands
 
 (load! "mercury")
+(load! "keybindings")
 
 
 ;; The below here is kept to just remember how I did keybindings for the Scala IDE
