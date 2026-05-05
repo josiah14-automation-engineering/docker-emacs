@@ -398,3 +398,62 @@ done; echo ')') > /tmp/default.el
 The output is valid straight.el alist format — `straight-freeze-versions` would have written the same structure. The file was copied out of the container with `docker cp` and committed as `straight-versions.el`.
 
 **Layer ordering.** The COPY lands before the final `doom sync`, so straight.el has the lockfile in place during that sync run. Docker creates the `versions/` directory automatically — it didn't exist in the running container and doesn't need to be pre-created.
+
+---
+
+#### Pop!_OS launcher integration
+
+The IDE is accessible from the GNOME application launcher as "Logic Languages IDE". Named broadly to leave room for Prolog and other logic languages in the same container rather than creating a separate image per language.
+
+**Files (not committed — contain personal system paths; keep in `host/` which is gitignored):**
+
+- `host/logic-languages-ide` — launch script
+- `host/logic-languages-ide.desktop` — desktop entry
+
+**Install locations (symlinked from `host/`):**
+
+```
+~/.local/bin/logic-languages-ide
+~/.local/share/applications/logic-languages-ide.desktop
+```
+
+**Launch script:**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec docker run --rm \
+  -e DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  -v /home/josiah/Development:/home/josiah/Development \
+  --name doom-mercury-ide \
+  --network=host \
+  josiah14/mercury-doom-emacs-ide:30.2-skylake-ubuntu-24.04
+```
+
+`exec` replaces the shell with the docker process rather than leaving a parent shell running. `--network=host` is needed for X11 display access. `--rm` keeps containers clean on exit.
+
+**Desktop entry:**
+
+```ini
+[Desktop Entry]
+Name=Logic Languages IDE
+Comment=Mercury and Prolog development environment (Doom Emacs 30.2)
+Exec=/home/josiah/.local/bin/logic-languages-ide
+Icon=emacs
+Terminal=false
+Type=Application
+Categories=Development;IDE;
+StartupNotify=false
+```
+
+`StartupNotify=false` suppresses the GNOME spinning cursor — the container takes a moment to start and GNOME would otherwise show the app as "not responding".
+
+**To register with GNOME after installing the `.desktop` file:**
+
+```bash
+update-desktop-database ~/.local/share/applications/
+```
+
+**To set up on a new machine:** recreate `host/` with the above contents, `chmod +x` the script, symlink both files, run `update-desktop-database`.
