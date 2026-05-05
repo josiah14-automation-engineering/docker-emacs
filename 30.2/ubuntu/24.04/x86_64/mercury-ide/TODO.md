@@ -27,7 +27,7 @@ The following packages in the dev Dockerfile apt list have no role in building E
 
 ## Pin all Emacs packages via straight.el lockfile
 
-Now that the image builds successfully, the next prerequisite is wiring up mercury-mode and flycheck before freezing package versions — packages may change once the Mercury-specific config is active. Steps once that is done:
+Mercury-mode and flycheck are now wired in and the image builds successfully — package versions are stable enough to freeze. Steps:
 
 1. Run a container from the completed image
 2. Inside Emacs, run `M-x straight-freeze-versions` — generates `~/.config/emacs/straight/versions/default.el` with the exact commit hash of every installed package
