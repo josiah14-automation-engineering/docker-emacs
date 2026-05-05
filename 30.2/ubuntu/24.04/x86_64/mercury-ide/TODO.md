@@ -1,21 +1,5 @@
 # TODO
 
-## Refactor to three-stage build to eliminate Mercury build dependencies from final image
-
-The mercury-ide Dockerfile currently installs Mercury's build-time apt dependencies (`build-essential`, `gcc`, `g++`, `flex`, `bison`, `libreadline-dev`, `autoconf`, `automake`, `libtool`, `libffi-dev`, `libicu-dev`, `pkg-config`, `libgccjit-13-dev`, `make`, etc.) in a layer that persists into the final image. Only the installed Mercury toolchain under `/usr/local` is actually needed at runtime.
-
-The fix is a three-stage build mirroring the pattern already used for Emacs:
-
-1. **Stage 1 — Emacs build** (`josiah14/emacs:30.2-skylake-ubuntu-24.04-dev`): already exists, unchanged.
-2. **Stage 2 — Mercury build**: a throw-away layer that installs the Mercury build dependencies, compiles Mercury from source (both bootstrap stages), and installs to `/usr/local`.
-3. **Stage 3 — Final image**: starts from `ubuntu:24.04`, copies `/usr/local` from both build stages via `COPY --from`, installs only runtime apt dependencies, then layers in Doom Emacs and config.
-
-The runtime apt dependencies for Mercury are a subset of the build dependencies — primarily `libgmp10`, `libreadline8`, and `libgcc-s1`. Everything else (`flex`, `bison`, `build-essential`, etc.) is build-time only and can be dropped from the final image.
-
-This mirrors exactly how the Emacs dev image already works and will produce a meaningfully smaller final image.
-
----
-
 ## Dev image: remove unused and misplaced apt packages
 
 The following packages in the dev Dockerfile apt list have no role in building Emacs and should be removed:
@@ -38,21 +22,6 @@ The following packages in the dev Dockerfile apt list have no role in building E
 - `libxft-dev` — Xft font rendering is bypassed when building with Cairo/HarfBuzz, but configure may still probe for it.
 - `libxcb1-dev`, `libxcb-shape0-dev`, `libx11-xcb-dev` — GTK3 uses XCB internally but Emacs configure may not need these headers directly.
 - `xaw3dg-dev`, `libxaw7-dev` — Athena Widget Set. With GTK3 selected, Emacs shouldn't need Xaw, but configure may probe regardless.
-
----
-
-## IDE image: remove remaining unnecessary -dev packages (post three-stage build)
-
-Once Mercury is isolated into its own build stage (see above), the following Mercury
-build-time -dev packages can be removed from the final image:
-
-- `libffi-dev` → replace with `libffi8` (Mercury runtime links against libffi; headers not needed)
-- `libicu-dev` → replace with `libicu74` (Mercury uses ICU for Unicode; headers not needed)
-- `libreadline-dev` → replace with `libreadline8` (mdb uses readline; headers not needed)
-- `libgccjit-13-dev` → consider replacing with `libgccjit0` (runtime-only); needs a test build to confirm AOT compilation still works
-
-Already done: `libgmp-dev`, `libncurses-dev`, `libwebp-dev`, `zlib1g-dev` removed (runtime
-counterparts were already present in the package list).
 
 ---
 

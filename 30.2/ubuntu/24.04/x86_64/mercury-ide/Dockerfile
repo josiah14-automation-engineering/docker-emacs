@@ -1,26 +1,11 @@
 FROM josiah14/emacs:30.2-skylake-ubuntu-24.04-dev AS emacs-build
-FROM ubuntu:24.04
 
-ARG USERNAME
-ARG USER_UID
-ARG USER_GID
-ARG FULLNAME
-ARG EMAIL
-ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
-ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
+
+# --- Mercury build stage ---
+FROM ubuntu:24.04 AS mercury-build
+
 ARG MERCURY_VERSION=22.01.8
 ARG DEBIAN_FRONTEND=noninteractive
-ARG TZ=US/Chicago
-
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
-ENV TERM=xterm-256color
-ENV NO_AT_BRIDGE=1
-ENV DOOMDIR=/home/${USERNAME}/.config/doom
-ENV PATH="/home/${USERNAME}/.emacs.d/bin:/home/${USERNAME}/.local/bin:${PATH}"
-
-
-COPY --from=emacs-build /usr/local /usr/local
 
 RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
       > /etc/apt/apt.conf.d/99lean
@@ -28,92 +13,29 @@ RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' 
 RUN apt-get update -y && \
     apt-get install -y \
       ca-certificates \
-      build-essential \
-      autoconf \
-      automake \
-      libtool \
-      libffi-dev \
-      libicu-dev \
-      libgmp10 \
-      pkg-config \
       curl \
       gawk \
-      git \
-      gnupg \
-      ripgrep \
-      fd-find \
-      unzip \
-      bash \
-      findutils \
-      coreutils \
-      xz-utils \
-      tar \
-      sudo \
-      locales \
-      libgccjit-13-dev \
+      build-essential \
       gcc \
       g++ \
       make \
+      autoconf \
+      automake \
+      libtool \
+      pkg-config \
       flex \
       bison \
+      libffi-dev \
+      libgmp-dev \
+      libicu-dev \
       libreadline-dev \
-      gdb \
-      imagemagick \
-      iputils-ping \
-      aspell \
-      libacl1 \
-      libasound2t64 \
-      alsa-base \
-      bzip2 \
-      libcanberra-gtk3-0 \
-      dbus \
-      x11-utils \
-      dbus-x11 \
-      libgif7 \
-      libgnutls30 \
-      libgpm2 \
-      gpm \
-      libglib2.0-0t64 \
-      libjansson4 \
-      libjpeg-turbo8 \
-      liblcms2-2 \
-      liblockfile-bin \
-      libtiff6 \
-      libgtk-3-0 \
-      libm17n-0 \
-      libncurses6 \
-      libncursesw6 \
-      libtinfo6 \
-      libsm6 \
-      libwebpdemux2 \
-      libwebp7 \
-      libwebpdecoder3 \
-      libtree-sitter0 \
-      libxext6 \
-      librsvg2-2 \
-      libxml2 \
-      libxrender1 \
-      openssh-client \
-      texinfo \
-      wget \
-      libxaw7 \
-      libxcb-util1 \
-      zlib1g \
-      fonts-dejavu-core \
-      adwaita-icon-theme \
-      fonts-firacode \
-      fonts-jetbrains-mono \
-      fontconfig \
-      vim \
-    && mkdir -p /etc/apt/keyrings \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
 
 # Build Mercury from source in two stages. Each grade is a distinct ABI selecting
 # the GC strategy, parallelism model, threading model, and backend.
 #
 # make always builds the default grade automatically; --enable-libgrades adds
-# additional grades on top of it. All three grades end up in the image:
+# additional grades on top of it. Both grades end up in the image:
 #   asm_fast.gc.par.stseg          — default runtime grade, explicitly set via
 #                                    --with-default-grade; without this flag
 #                                    configure auto-selects the simpler asm_fast.gc
@@ -165,6 +87,106 @@ RUN curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERS
     && rm -rf mercury-srcdist-${MERCURY_VERSION} \
               mercury-srcdist-${MERCURY_VERSION}.tar.xz \
               mercury-srcdist-${MERCURY_VERSION}.tar.xz.sha512
+
+
+# --- Final image ---
+FROM ubuntu:24.04
+
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
+ARG FULLNAME
+ARG EMAIL
+ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
+ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
+ARG DEBIAN_FRONTEND=noninteractive
+ARG TZ=US/Chicago
+
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV TERM=xterm-256color
+ENV NO_AT_BRIDGE=1
+ENV DOOMDIR=/home/${USERNAME}/.config/doom
+ENV PATH="/home/${USERNAME}/.emacs.d/bin:/home/${USERNAME}/.local/bin:${PATH}"
+
+COPY --from=emacs-build /usr/local /usr/local
+COPY --from=mercury-build /usr/local /usr/local
+
+RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
+      > /etc/apt/apt.conf.d/99lean
+
+RUN apt-get update -y && \
+    apt-get install -y \
+      ca-certificates \
+      curl \
+      gawk \
+      git \
+      gnupg \
+      ripgrep \
+      fd-find \
+      unzip \
+      bash \
+      findutils \
+      coreutils \
+      xz-utils \
+      tar \
+      sudo \
+      locales \
+      libgccjit-13-dev \
+      gdb \
+      imagemagick \
+      iputils-ping \
+      aspell \
+      libacl1 \
+      libasound2t64 \
+      alsa-base \
+      bzip2 \
+      libcanberra-gtk3-0 \
+      dbus \
+      x11-utils \
+      dbus-x11 \
+      libgif7 \
+      libgnutls30 \
+      libgpm2 \
+      gpm \
+      libglib2.0-0t64 \
+      libjansson4 \
+      libjpeg-turbo8 \
+      liblcms2-2 \
+      liblockfile-bin \
+      libtiff6 \
+      libgtk-3-0 \
+      libm17n-0 \
+      libncurses6 \
+      libncursesw6 \
+      libtinfo6 \
+      libsm6 \
+      libwebpdemux2 \
+      libwebp7 \
+      libwebpdecoder3 \
+      libtree-sitter0 \
+      libxext6 \
+      librsvg2-2 \
+      libxml2 \
+      libxrender1 \
+      openssh-client \
+      texinfo \
+      wget \
+      libxaw7 \
+      libxcb-util1 \
+      zlib1g \
+      fonts-dejavu-core \
+      adwaita-icon-theme \
+      fonts-firacode \
+      fonts-jetbrains-mono \
+      fontconfig \
+      vim \
+      libgmp10 \
+      libffi8 \
+      libicu74 \
+      libreadline8 \
+    && mkdir -p /etc/apt/keyrings \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 
 # We don't need the default ubuntu user, and that user's uid is likely to conflict
