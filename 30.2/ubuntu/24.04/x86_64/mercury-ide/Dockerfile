@@ -227,9 +227,10 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
 
 # Config files are copied after the expensive doom install + sync steps so that
 # changes to config alone only invalidate the last two layers.
-COPY --chown=${USERNAME}:${USERNAME} config.el /home/${USERNAME}/.config/doom/config.el
-COPY --chown=${USERNAME}:${USERNAME} init.el /home/${USERNAME}/.config/doom/init.el
+COPY --chown=${USERNAME}:${USERNAME} config.el   /home/${USERNAME}/.config/doom/config.el
+COPY --chown=${USERNAME}:${USERNAME} init.el     /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
+COPY --chown=${USERNAME}:${USERNAME} mercury.el  /home/${USERNAME}/.config/doom/mercury.el
 
 RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \
     && sed -i "s/<email-address>/\"${EMAIL}\"/" /home/${USERNAME}/.config/doom/config.el \

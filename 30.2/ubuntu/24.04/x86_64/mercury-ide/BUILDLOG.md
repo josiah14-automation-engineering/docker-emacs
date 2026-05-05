@@ -316,6 +316,16 @@ Two reproducibility gaps in the font installation step were closed:
 
 The `variable-fonts` tag in the adobe-fonts/source-code-pro repo is treated as stable; if it is ever moved the sha512 check will catch it and fail the build loudly.
 
+#### IDE image: three-stage build
+
+The Dockerfile was refactored from a two-stage build (emacs-build + final) to a three-stage build (emacs-build + mercury-build + final). The Mercury two-stage bootstrap compile moves into a throw-away `mercury-build` stage; the final image receives only `/usr/local` from each build stage via `COPY --from`.
+
+Mercury build dependencies (`build-essential`, `gcc`, `g++`, `flex`, `bison`, `autoconf`, `automake`, `libtool`, `pkg-config`, `libffi-dev`, `libgmp-dev`, `libicu-dev`, `libreadline-dev`) are now confined to the mercury-build stage and do not appear in the final image. The final image gains the Mercury runtime equivalents instead: `libffi8`, `libicu74`, `libreadline8`, with `libgmp10` already present.
+
+The mercury-build stage is intentionally inline rather than a separate pre-built image. Unlike the Emacs dev image — which is shared across multiple IDE images — the Mercury build is consumed only by this Dockerfile. Keeping it inline also co-locates the build dependencies and the runtime dependencies in a single file, making the coupling between them explicit and harder to accidentally break when bumping the Mercury version.
+
+Build succeeded with this structure.
+
 #### IDE image: build success
 
 With the above fixes in place the full image built successfully. The image contains:
@@ -329,3 +339,35 @@ Remaining manual post-boot steps before the image is production-ready (per READM
 1. Two unicode mapping passes (let each complete before proceeding)
 2. `M-x all-the-icons-install-fonts` to install Nerd Fonts
 3. `docker commit` the result
+
+---
+
+### 2026-05-05 (continued)
+
+#### Mercury mode and flycheck wiring
+
+Added `mercury.el` — a separate config file loaded via `(load! "mercury")` in `config.el`. Using a separate file rather than inlining into `config.el` because the Mercury-specific setup has enough distinct concerns (mode, checker definition, hook) to warrant isolation.
+
+**Major mode selection — why not Mercury's own `mercury.el`?**
+
+Mercury's source distribution ships Emacs support in `extras/emacs/mercury.el`. However, that directory is not installed by `make install` — it lives only in the source tree. Since the Dockerfile cleans up the source tree after both compile stages (`rm -rf mercury-srcdist-${MERCURY_VERSION}`), Mercury's own `mercury.el` is not present in the image. Options considered:
+
+1. **Mercury's `extras/emacs/mercury.el`** — not available post-cleanup; would require either skipping the rm or separately extracting and installing the elisp file. Not worth the complexity.
+2. **`prolog-mode` with Mercury dialect** — Emacs ships `prolog-mode` which has a `(setq prolog-system 'mercury)` dialect setting. Mercury's syntax is Prolog-derived and prolog-mode's highlighting mostly applies. Rejected because it's a poor fit: Mercury has distinct syntax (type declarations, mode declarations, determinism annotations, `:-` vs `-->` vs `==>`) that prolog-mode doesn't know about.
+3. **`metal-mercury-mode`** (GitHub: `ahungry/metal-mercury-mode`) — a dedicated Mercury major mode, installable via straight.el recipe. Selected.
+
+**Flycheck checker — why not write one from scratch?**
+
+Initial plan was to write a custom `flycheck-define-checker` for `mmc`. Abandoned after finding `flycheck-mercury` on MELPA (GitHub: `flycheck/flycheck-mercury`). It defines checker `mercury-mmc` with a custom error parser (`flycheck-mmc-error-parser`) that processes mmc output line-by-line rather than using regex patterns — this is the right approach because mmc's error format doesn't have a fixed column field and severity classification requires context across lines.
+
+**Mode-name mismatch — not actually an issue.** Reading `flycheck-mercury`'s source confirmed that its `:modes` list explicitly includes `mercury-mode`, `metal-mercury-mode`, and `prolog-mode`. Flycheck's auto-selection works without any explicit `setq-local flycheck-checker`. Checker name confirmed as `mercury-mmc`.
+
+**mmc invocation:** `mmc -e --infer-all <source>`. `-e` means check only — no `.c`/`.o` side effects. `--infer-all` allows the compiler to infer types, modes, and determinism rather than requiring full annotations, which matters for learning code that won't always have complete declarations.
+
+**No LSP.** The CLAUDE.md note (and earlier decision) stands: no LSP server exists for Mercury with reliable support. `dumb-jump` (provided by the `lookup` module already in `init.el`) handles go-to-definition via grep. Flycheck with `mmc` handles error feedback.
+
+**Files changed:**
+- `mercury.el` — new file (mode, flycheck integration, hook)
+- `packages.el` — added `flycheck-mercury` (MELPA) and `metal-mercury-mode` (GitHub recipe)
+- `config.el` — added `(load! "mercury")`
+- `Dockerfile` — added `COPY` for `mercury.el` alongside the other doom config files

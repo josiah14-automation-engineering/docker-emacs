@@ -49,4 +49,7 @@
 ;; ...Or *all* packages (NOT RECOMMENDED; will likely break things)
 ;; (unpin! t)
 
+(package! flycheck-mercury)
+(package! metal-mercury-mode
+  :recipe (:host github :repo "ahungry/metal-mercury-mode"))
 
