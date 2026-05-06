@@ -1,5 +1,8 @@
 FROM ubuntu:24.04
 
+ARG MARCH=skylake
+ARG MTUNE=skylake
+
 RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
     DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get install -y \
             libwebp-dev \
@@ -68,7 +71,7 @@ RUN git clone --depth 1 --branch emacs-30.2 git://git.savannah.gnu.org/emacs.git
                 --with-modules --with-gnutls --with-json --with-rsvg --with-xml2 --with-wide-int --with-tree-sitter \
                 --with-cairo --with-harfbuzz --with-png --with-tiff --with-gif \
                 --enable-link-time-optimization \
-                CFLAGS="-O2 -pipe -mtune=skylake -march=skylake" \
+                CFLAGS="-O2 -pipe -march=${MARCH} -mtune=${MTUNE}" \
                 LDFLAGS="-Wl,-O1 -Wl,--as-needed" \
  && make -j"$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" V=1 \
  && make install \

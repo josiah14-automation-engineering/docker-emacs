@@ -1,13 +1,5 @@
 # TODO
 
-## Make CPU tuning a build ARG
-
-`-march=skylake -mtune=skylake` is hardcoded in both Mercury configure and Emacs
-`CFLAGS`. Introduce `ARG MARCH=skylake` and `ARG MTUNE=skylake` so the same
-Dockerfile can target generic x86-64, Zen, or ARM without edits.
-
----
-
 ## Add a mercury-ide README
 
 The directory has BUILDLOG.md and TODO.md but no user-facing README. Add one

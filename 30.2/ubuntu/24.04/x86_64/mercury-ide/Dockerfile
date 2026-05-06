@@ -1,9 +1,14 @@
+ARG MARCH=skylake
+ARG MTUNE=skylake
+
 FROM josiah14/emacs:30.2-skylake-ubuntu-24.04-dev AS emacs-build
 
 
 # --- Mercury build stage ---
 FROM ubuntu:24.04 AS mercury-build
 
+ARG MARCH
+ARG MTUNE
 ARG MERCURY_VERSION=22.01.8
 ARG MERCURY_SHA512=61c1f34f48bf2bfc045ff5b78f7c2803fed99430e1a5ccb341f71f34c71f6fdcb2d3eb25c8c4cee04786d1b2b1ab203cc4eaefea67e17643e65dbf048a0e0ea4
 ARG DEBIAN_FRONTEND=noninteractive
@@ -68,7 +73,7 @@ RUN curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERS
          --prefix=/usr/local \
          --with-default-grade=asm_fast.gc.par.stseg \
          --enable-libgrades=asm_fast.gc.par.stseg.debug \
-         CFLAGS="-O2 -march=skylake -mtune=skylake" \
+         CFLAGS="-O2 -march=${MARCH} -mtune=${MTUNE}" \
     && make PARALLEL=-j$(nproc) \
     && make PARALLEL=-j$(nproc) install \
     && cd .. \
@@ -79,7 +84,7 @@ RUN curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERS
          --prefix=/usr/local \
          --with-default-grade=asm_fast.gc.par.stseg \
          --enable-libgrades=asm_fast.gc.par.stseg.debug \
-         CFLAGS="-O2 -march=skylake -mtune=skylake" \
+         CFLAGS="-O2 -march=${MARCH} -mtune=${MTUNE}" \
     && make PARALLEL=-j$(nproc) \
     && make PARALLEL=-j$(nproc) install \
     && cd .. \

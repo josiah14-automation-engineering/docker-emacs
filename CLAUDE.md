@@ -124,7 +124,7 @@ RUN doom sync -! -u -j ... --aot --gc
 
 ### Placeholder substitution
 
-The Dockerfile contains a `sed` step to substitute `<full-name>` and `<email-address>` into `config.el`. In this personal repo, `config.el` files have real values hardcoded rather than placeholders, so the `sed` commands are effectively no-ops. The mechanism exists for templating.
+The Dockerfile contains a `sed` step to substitute `<full-name>` and `<email-address>` into `config.el`. The `config.el` files use these literal placeholders (not real values), so the `sed` step is the live mechanism that injects identity at build time. `build.sh` reads `FULLNAME` and `EMAIL` from the environment and passes them as `--build-arg`; it will fail fast if either is unset.
 
 ### `ulimit -n 262144`
 
