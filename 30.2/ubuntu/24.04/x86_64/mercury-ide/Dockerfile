@@ -5,6 +5,7 @@ FROM josiah14/emacs:30.2-skylake-ubuntu-24.04-dev AS emacs-build
 FROM ubuntu:24.04 AS mercury-build
 
 ARG MERCURY_VERSION=22.01.8
+ARG MERCURY_SHA512=61c1f34f48bf2bfc045ff5b78f7c2803fed99430e1a5ccb341f71f34c71f6fdcb2d3eb25c8c4cee04786d1b2b1ab203cc4eaefea67e17643e65dbf048a0e0ea4
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
@@ -59,9 +60,7 @@ RUN apt-get update -y && \
 # The build fails loudly at sha512sum if the tarball is corrupt or tampered with.
 RUN curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERSION}.tar.xz \
          -o mercury-srcdist-${MERCURY_VERSION}.tar.xz \
-    && curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERSION}.tar.xz.sha512 \
-         -o mercury-srcdist-${MERCURY_VERSION}.tar.xz.sha512 \
-    && echo "$(awk '{print $1}' mercury-srcdist-${MERCURY_VERSION}.tar.xz.sha512)  mercury-srcdist-${MERCURY_VERSION}.tar.xz" \
+    && echo "${MERCURY_SHA512}  mercury-srcdist-${MERCURY_VERSION}.tar.xz" \
          | sha512sum -c - \
     && tar -xf mercury-srcdist-${MERCURY_VERSION}.tar.xz \
     && cd mercury-srcdist-${MERCURY_VERSION} \

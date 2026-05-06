@@ -1,14 +1,5 @@
 # TODO
 
-## Hardcode Mercury tarball SHA512 in Dockerfile
-
-The build currently fetches both the tarball and its `.sha512` file from the same
-release host. A compromised host could serve matching tampered files and the
-`sha512sum` check would still pass. Add an `ARG MERCURY_SHA512=<known-hash>` and
-verify the tarball against it directly, dropping the `.sha512` fetch.
-
----
-
 ## Make CPU tuning a build ARG
 
 `-march=skylake -mtune=skylake` is hardcoded in both Mercury configure and Emacs
