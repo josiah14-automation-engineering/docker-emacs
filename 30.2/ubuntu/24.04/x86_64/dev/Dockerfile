@@ -3,6 +3,8 @@ FROM ubuntu:24.04
 ARG MARCH=skylake
 ARG MTUNE=skylake
 
+ENV NO_AT_BRIDGE=1
+
 RUN DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get update && \
     DEBIAN_FRONTEND=noninteractive TZ=US/Chicago apt-get install -y \
             libwebp-dev \
