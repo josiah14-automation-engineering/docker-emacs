@@ -16,6 +16,7 @@ ARG FULLNAME
 ARG EMAIL
 ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
 ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
+ARG POWERLINE_FONTS_COMMIT=a029626780dd4af32f15a3e708a5b00528c22f1d
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -33,16 +34,78 @@ RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' 
 
 RUN apt-get update -y && \
     apt-get install -y \
-      ca-certificates curl gawk git gnupg ripgrep fd-find unzip bash \
-      findutils coreutils xz-utils tar sudo locales libgccjit-13-dev \
-      imagemagick iputils-ping aspell libacl1 libasound2t64 alsa-base \
-      bzip2 libcanberra-gtk3-0 dbus x11-utils dbus-x11 libgif7 libgnutls30 \
-      libgpm2 gpm libglib2.0-0t64 libjansson4 libjpeg-turbo8 liblcms2-2 \
-      liblockfile-bin libtiff6 libgtk-3-0 libm17n-0 libncurses6 libncursesw6 \
-      libtinfo6 libsm6 libwebpdemux2 libwebp7 libwebpdecoder3 libtree-sitter0 \
-      libxext6 librsvg2-2 libxml2 libxrender1 openssh-client texinfo wget \
-      libxaw7 libxcb-util1 zlib1g fonts-dejavu-core adwaita-icon-theme \
-      fonts-firacode fonts-jetbrains-mono fontconfig vim \
+      `# --- system utilities ---` \
+      bash \
+      bzip2 \
+      ca-certificates \
+      coreutils \
+      curl \
+      findutils \
+      gawk \
+      git \
+      gnupg \
+      locales \
+      sudo \
+      tar \
+      texinfo \
+      unzip \
+      wget \
+      xz-utils \
+      `# --- cli live troubleshooting tools ---` \
+      aspell \
+      fd-find \
+      iputils-ping \
+      openssh-client \
+      ripgrep \
+      vim \
+      `# --- native elisp compilation ---` \
+      libgccjit-13-dev \
+      `# --- emacs runtime: audio ---` \
+      alsa-base \
+      libasound2t64 \
+      libcanberra-gtk3-0 \
+      `# --- emacs runtime: display ---` \
+      dbus \
+      dbus-x11 \
+      gpm \
+      libglib2.0-0t64 \
+      libgpm2 \
+      libgtk-3-0 \
+      libsm6 \
+      libxaw7 \
+      libxcb-util1 \
+      libxext6 \
+      libxrender1 \
+      x11-utils \
+      `# --- emacs runtime: image ---` \
+      imagemagick \
+      libgif7 \
+      libjpeg-turbo8 \
+      liblcms2-2 \
+      librsvg2-2 \
+      libtiff6 \
+      libwebp7 \
+      libwebpdecoder3 \
+      libwebpdemux2 \
+      `# --- emacs runtime: text / encoding ---` \
+      libm17n-0 \
+      libncurses6 \
+      libncursesw6 \
+      libtinfo6 \
+      `# --- emacs runtime: misc ---` \
+      libacl1 \
+      libgnutls30 \
+      libjansson4 \
+      liblockfile-bin \
+      libtree-sitter0 \
+      libxml2 \
+      zlib1g \
+      `# --- fonts ---` \
+      adwaita-icon-theme \
+      fontconfig \
+      fonts-dejavu-core \
+      fonts-firacode \
+      fonts-jetbrains-mono \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN userdel ubuntu || true \
@@ -59,7 +122,7 @@ ENV HOME=/home/${USERNAME}
 RUN cd /home/${USERNAME} \
     && git clone https://github.com/powerline/fonts.git \
     && cd fonts \
-    && git checkout a029626780dd4af32f15a3e708a5b00528c22f1d \
+    && git checkout "${POWERLINE_FONTS_COMMIT}" \
     && chmod +x install.sh && ./install.sh \
     && cd .. && rm -rf ./fonts \
     && mkdir -p /home/${USERNAME}/.local/share/fonts/truetype/source-code-pro \

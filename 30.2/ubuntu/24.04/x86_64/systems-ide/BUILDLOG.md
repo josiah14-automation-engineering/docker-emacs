@@ -176,6 +176,34 @@ in config.el yet — they are added as part of each step.
 
 No build has been attempted yet.
 
+---
+
+### 2026-05-06 — Dockerfile apt list cleanup; Powerline commit parameterized
+
+The `apt-get install` block was reformatted: each of the 63 packages moved to its
+own line, and grouped by role using inline backtick-subshell comment labels
+(`` `# --- group ---` ``). Groups: system utilities, cli live troubleshooting tools,
+native elisp compilation, emacs runtime (audio / display / image / text+encoding /
+misc), fonts. Packages alphabetized within each group.
+
+Josiah reviewed the labels and sharpened two: "cli tools" became "cli live
+troubleshooting tools" to make the intent of that group explicit, and "native
+compilation" became "native elisp compilation" to distinguish it from toolchain
+compilation steps that appear elsewhere in the file. Both corrections reflect
+reading the groupings critically rather than accepting the first pass.
+
+The Powerline fonts git commit hash was extracted from the `git checkout` step and
+promoted to a named `POWERLINE_FONTS_COMMIT` ARG in the header block, consistent
+with the `DOOM_COMMIT` pattern.
+
+Josiah then asked whether the source-code-pro sha512 should be parameterized by
+the same logic. The answer is no: `POWERLINE_FONTS_COMMIT` controls *what* is
+fetched and is a legitimate build-time variable. The sha512 is an integrity check
+on a specific artifact — parameterizing it would allow a `--build-arg` override to
+silently bypass the check. The right time to promote it to an ARG is if the
+download URL or tag is also parameterized, so that version and hash travel together
+as a pair. Josiah accepted that distinction.
+
 **Outstanding before first build attempt:**
 
 1. **Pin Zig version and sha512.** Identify the current stable Zig release, fetch
