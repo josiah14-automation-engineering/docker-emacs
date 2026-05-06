@@ -152,8 +152,29 @@ the download tooling, not to contain build dependencies.
 
 ### 2026-05-06 — Scaffolding created
 
-Scaffold files created: `Dockerfile`, `build.sh`, `init.el`, `config.el`,
-`packages.el`. No build has been attempted yet.
+Initial scaffold files created: `Dockerfile`, `build.sh`, `init.el`, `config.el`,
+`packages.el`. The first pass included the full language stack already wired into
+init.el and the Dockerfile. After review, Josiah directed a reset to bare Doom —
+no language modules yet, cross-language tooling (LSP framework, debugger, magit,
+flycheck, company, vertico) only. The rationale: add one language at a time so
+each addition can be built, tested, and understood in isolation. The full language
+roadmap is captured in `TODO.md` rather than pre-emptively implemented.
+
+Josiah also set the collaboration expectation for this IDE going forward: each
+language addition should be discussed before any code is written, and larger
+elisp sections (keybindings, mode configuration) he intends to author himself.
+The IDE build is a practice, not a deliverable to be generated and handed over.
+
+Per that structure, skeleton keybinding files were created for every full-support
+language at scaffolding time: `sh-keybindings.el`, `c-keybindings.el`,
+`rust-keybindings.el`, `zig-keybindings.el`, `cmake-keybindings.el`,
+`lua-keybindings.el`, `nix-keybindings.el`, `guile-keybindings.el`. Each file
+is empty except for a header comment. The files are COPY'd into the image now so
+the structure is in place; each is activated via `(load! "<name>-keybindings")` in
+`config.el` when its language step is worked through. No `load!` calls are present
+in config.el yet — they are added as part of each step.
+
+No build has been attempted yet.
 
 **Outstanding before first build attempt:**
 

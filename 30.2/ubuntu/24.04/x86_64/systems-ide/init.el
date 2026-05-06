@@ -47,24 +47,11 @@
        make
 
        :lang
-       (cc +lsp)              ; C/C++ — clangd
-       (rust +lsp)            ; Rust — rust-analyzer via rustup
-       zig                    ; Zig — zls
-       (sh +lsp)              ; Shell — bash-language-server
-       (lua +lsp)             ; Lua — lua-language-server
-       nix                    ; Nix — nil LSP
-       (scheme +guile)        ; Guile/Scheme — Geiser REPL integration
-       cmake                  ; CMake — cmake-language-server
-       (python)               ; Python — syntax only, no LSP
-       (go)                   ; Go — syntax only, no LSP
-       ruby                   ; Ruby — syntax only
-       perl                   ; Perl — syntax only
-       asm                    ; Assembly — x86/ARM syntax
-       data                   ; JSON, CSV, etc.
+       data
        emacs-lisp
+       json
        markdown
        org
-       json
        yaml
 
        :config

@@ -26,22 +26,3 @@
   (global-company-mode))
 
 (setq vertico-cycle t)
-
-;; C/C++ style
-(setq c-default-style "linux"
-      c-basic-offset 4)
-
-;; TODO: configure codelldb DAP server for Rust and Zig once codelldb is installed.
-;; (setq dap-codelldb-extension-path "<path-to-codelldb-adapter-dir>")
-;; (require 'dap-codelldb)
-
-;; TODO: configure dap-gdb-lldb for C/C++ debugging.
-;; (require 'dap-gdb-lldb)
-
-;; TODO: configure toml-mode and taplo LSP once taplo binary is installed.
-;; (with-eval-after-load 'lsp-mode
-;;   (add-to-list 'lsp-language-id-configuration '(toml-mode . "toml"))
-;;   (lsp-register-client
-;;    (make-lsp-client :new-connection (lsp-stdio-connection "taplo")
-;;                     :major-modes '(toml-mode)
-;;                     :server-id 'taplo)))
