@@ -1,5 +1,31 @@
 # TODO
 
+## Hardcode Mercury tarball SHA512 in Dockerfile
+
+The build currently fetches both the tarball and its `.sha512` file from the same
+release host. A compromised host could serve matching tampered files and the
+`sha512sum` check would still pass. Add an `ARG MERCURY_SHA512=<known-hash>` and
+verify the tarball against it directly, dropping the `.sha512` fetch.
+
+---
+
+## Make CPU tuning a build ARG
+
+`-march=skylake -mtune=skylake` is hardcoded in both Mercury configure and Emacs
+`CFLAGS`. Introduce `ARG MARCH=skylake` and `ARG MTUNE=skylake` so the same
+Dockerfile can target generic x86-64, Zen, or ARM without edits.
+
+---
+
+## Add a mercury-ide README
+
+The directory has BUILDLOG.md and TODO.md but no user-facing README. Add one
+covering: build command, run command, X11 setup, mounted project directory
+example, expected Mercury version, expected Doom commit, what works, what
+does not, and a 30-second smoke test.
+
+---
+
 ## Dev image: remove unused and misplaced apt packages
 
 The following packages in the dev Dockerfile apt list have no role in building Emacs and should be removed:

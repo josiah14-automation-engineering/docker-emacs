@@ -107,7 +107,7 @@ ENV LC_ALL=C.UTF-8
 ENV TERM=xterm-256color
 ENV NO_AT_BRIDGE=1
 ENV DOOMDIR=/home/${USERNAME}/.config/doom
-ENV PATH="/home/${USERNAME}/.emacs.d/bin:/home/${USERNAME}/.local/bin:${PATH}"
+ENV PATH="/home/${USERNAME}/.config/emacs/bin:/home/${USERNAME}/.local/bin:${PATH}"
 
 COPY --from=emacs-build /usr/local /usr/local
 COPY --from=mercury-build /usr/local /usr/local
