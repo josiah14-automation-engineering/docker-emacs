@@ -457,3 +457,38 @@ update-desktop-database ~/.local/share/applications/
 ```
 
 **To set up on a new machine:** recreate `host/` with the above contents, `chmod +x` the script, symlink both files, run `update-desktop-database`.
+
+---
+
+### 2026-05-06
+
+#### Post-completion review: external feedback and targeted hardening
+
+With the mercury-ide image working end-to-end, the Dockerfile and supporting files were reviewed against a set of external critique. Items actioned, in order:
+
+**1. Doom binary PATH bug (fixed)**
+
+The final image had:
+```dockerfile
+ENV PATH="/home/${USERNAME}/.emacs.d/bin:/home/${USERNAME}/.local/bin:${PATH}"
+```
+But Doom is cloned to `~/.config/emacs`, so `~/.emacs.d/bin` does not exist. All `doom` invocations in the Dockerfile use full paths, so the build succeeded — but `doom` was unreachable from the container shell at runtime. Fixed to `~/.config/emacs/bin`.
+
+**2. Mercury tarball SHA512 hardened**
+
+The build previously fetched both the tarball and its `.sha512` file from the same release host (`dl.mercurylang.org`). A compromised host could serve matching tampered files, and the `sha512sum` check would still pass. Added `ARG MERCURY_SHA512` with the known hash baked in; the `.sha512` fetch was removed. The build now verifies the tarball against a value committed to the repository rather than one fetched at build time.
+
+**3. CPU tuning parameterized — scope catch by Josiah**
+
+`-march=skylake -mtune=skylake` was hardcoded in the Mercury configure `CFLAGS`. The initial fix parametrized those flags in `mercury-ide/Dockerfile` using `ARG MARCH=skylake` / `ARG MTUNE=skylake` and updated `mercury-ide/build.sh` to pass them through with the image tag reflecting the chosen tuning.
+
+Josiah noted that the same hardcoded flags existed in the dev image Dockerfile as well, and that both build scripts needed corresponding updates — neither of which had been addressed. This was a correct and substantive catch: the dev image is the base layer for the entire 30.2 IDE stack, so leaving its CFLAGS hardcoded would have made the parameterization incomplete and the dev/IDE images inconsistent. The fix was extended to `30.2/ubuntu/24.04/x86_64/dev/Dockerfile` and `dev/build.sh`, with `MARCH`/`MTUNE` as shell variables in both build scripts defaulting to `skylake` and overrideable via environment.
+
+**4. Identity templating for public sharing — Josiah pushed scope**
+
+With the CPU tuning work done, Josiah directed that `FULLNAME` and `EMAIL` be removed from `mercury-ide/build.sh` where they were hardcoded as literal strings, and that `config.el` be confirmed clean of personal data. `config.el` had:
+```elisp
+(setq user-full-name "<full-name>"
+      user-mail-address "<email-address>")
+```
+The Dockerfile had always contained a `sed` substitution step for `<full-name>` and `<email-address>` placeholders, but `config.el` used real values, making the `sed` a no-op. The decision to open-source this repo activated the mechanism properly: `config.el` now uses the placeholders, `build.sh` reads `FULLNAME` and `EMAIL` from the environment and fails fast if either is unset, and `CLAUDE.md` was updated to document the live injection path.
