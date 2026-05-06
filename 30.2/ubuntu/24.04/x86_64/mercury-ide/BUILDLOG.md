@@ -492,3 +492,23 @@ With the CPU tuning work done, Josiah directed that `FULLNAME` and `EMAIL` be re
       user-mail-address "<email-address>")
 ```
 The Dockerfile had always contained a `sed` substitution step for `<full-name>` and `<email-address>` placeholders, but `config.el` used real values, making the `sed` a no-op. The decision to open-source this repo activated the mechanism properly: `config.el` now uses the placeholders, `build.sh` reads `FULLNAME` and `EMAIL` from the environment and fails fast if either is unset, and `CLAUDE.md` was updated to document the live injection path.
+
+---
+
+#### Git history scrub: personal info removed from all prior commits
+
+With the repo being prepared for public sharing, a full audit of git history was run to locate personal information embedded in file content across all commits. The exposure was wider than expected — not limited to the 30.2 mercury-ide files but reaching back through 29.2 and 27.2 images, touching `config.el`, `build.sh`, `Dockerfile`, `README.md`, and `CLAUDE.md` across multiple IDE variants.
+
+The name and email address that had been hardcoded in various `config.el` and `build.sh` files across the history were present in all of those commits. The proactive instinct to search beyond the most recent files before running the scrub was well-placed — a narrower search would have missed the older IDE history.
+
+**Tool used:** `git filter-repo --replace-text` with a replacements file mapping both strings to their `<full-name>` / `<email-address>` placeholders. This rewrites every blob in every commit that contains the target strings, preserving commit topology, messages, authorship metadata, and timestamps. Only the commit SHAs change.
+
+**Two-pass fix required.** The replacements file syntax places a `literal:` type prefix on both the search and replacement sides. On the first pass, this prefix was included literally in the replacement output — older commits ended up with `"literal:<full-name>"` in the text rather than the intended `"<full-name>"`. A second `filter-repo` pass cleaned up the leaked prefix.
+
+**Remaining:** Commit author metadata (`Author:` field in `git log`) still shows the repo owner's name and a personal email address. This is standard public repo attribution and is not embedded in any file content. `filter-repo` does not touch author metadata unless explicitly instructed to, and rewriting it was out of scope.
+
+**After the scrub:** `git filter-repo` removes the `origin` remote as a safety measure against accidental push. Re-add and force push:
+```bash
+git remote add origin <remote-url>
+git push --force origin master
+```
