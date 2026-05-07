@@ -52,6 +52,7 @@
        json
        markdown
        org
+       (sh +lsp)
        yaml
 
        :config

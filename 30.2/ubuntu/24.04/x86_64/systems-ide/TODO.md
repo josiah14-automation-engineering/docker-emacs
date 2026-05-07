@@ -7,23 +7,29 @@ to the next.
 
 ---
 
-## Step 1: Shell (bash/sh)
+## Step 1: Shell (bash/sh/zsh/ksh) — configuration complete, build pending
 
-**Priority: highest.** Shell is the connective tissue of systems programming.
+Scope expanded from bash/sh to bash, sh, zsh, and ksh. Full details in BUILDLOG.
 
-**Dockerfile:**
-- Add `nodejs npm` to the apt list
-- Add `RUN npm install -g bash-language-server` after the apt step
+**What was built:**
+- `bash-language-server@5.6.0` (npm) for LSP; `shellcheck` for diagnostics
+- `zshdb` + `realgud` for zsh debugging
+- `shell.el`: `bash-mode`, `zsh-mode`, `ksh-mode` derived from `sh-mode`;
+  `register-shell-file-patterns` to wire dotfile and extension patterns;
+  `lsp-bash-shellcheck-arguments "-x"` (shebang auto-detection, no `-s` override)
+- `sh-keybindings.el`: `SPC m e e/b` execute, `SPC m r r` rename,
+  `SPC m d d` zshdb, `SPC m s s` set shell dialect
 
-**init.el:**
-- Add `(sh +lsp)` to `:lang`
+**Known gap:**
+- Debugger binding (`SPC m d d`) invokes `realgud:zshdb` from `sh-mode-map` —
+  activates in bash/ksh buffers where it is incorrect. `realgud:bashdb` deferred
+  until `bashdb` is added to the image and a dispatch function is written.
 
-**config.el:**
-- Add `(load! "sh-keybindings")` to activate the keybindings file
-- Add any shell-specific configuration and keybindings to `sh-keybindings.el`
-
-**Verify:** Open a `.sh` file; confirm flycheck diagnostics and completions work.
-Run `which bash-language-server` inside the container to confirm it's on PATH.
+**Verify (when built):**
+- Open a `.sh` file; confirm LSP completions and flycheck diagnostics
+- Open a `.zshrc`; confirm modeline shows "ZSH" not "Shell[bash]"
+- Run `which bash-language-server` and `which shellcheck` inside the container
+- Run `M-x realgud:zshdb` on a zsh script; confirm debugger launches
 
 ---
 

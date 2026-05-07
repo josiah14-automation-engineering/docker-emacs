@@ -246,3 +246,245 @@ as a pair. Josiah accepted that distinction.
 10. **Generate straight.el lockfile.** After a successful first build, walk
     `~/.config/emacs/.local/straight/repos/` and generate `straight-versions.el`
     using the same approach as mercury-ide.
+
+---
+
+### 2026-05-06 — Step 1: Shell language support wired
+
+Shell was chosen as the first language addition — highest priority per `TODO.md`
+and the connective tissue of systems programming. The step expanded significantly
+from the TODO stub once the full tooling picture was worked through.
+
+#### bash-language-server
+
+The language server is TypeScript compiled to JavaScript, distributed on npm, and
+runs on Node. It is a thin LSP bridge: completions, hover, go-to-definition for
+functions. The actual diagnostic intelligence comes from **shellcheck**, a separate
+Haskell binary that is invoked as a subprocess. Without shellcheck on PATH,
+the language server runs but diagnostics are silent. Both must be in the image.
+
+Josiah asked whether bash-language-server could be native-compiled for better
+performance. The answer is no in any meaningful sense — Node's V8 JIT-compiles
+JavaScript at runtime but there is no AOT path to machine code for Node
+applications. `deno compile` and Bun's `--compile` flag both package JS with
+their respective engines (V8 and JavaScriptCore), not native code. For a
+language server — a long-running process that starts once per session and warms
+up through JIT after a few interactions — this is irrelevant in practice.
+
+The alternative path (flycheck wired directly to shellcheck, bypassing the
+language server entirely) was raised and discussed. It gives diagnostics without
+the Node dependency. Josiah chose the full LSP path for the completions and
+function navigation it adds on top of raw shellcheck.
+
+**bash-language-server pinned to 5.6.0** (latest stable as of May 2026; released
+April 2025, no newer release available).
+
+#### Shellcheck argument tuning
+
+`bash-language-server` exposes a `bashIde.shellcheckArguments` configuration
+key, set in Emacs via `lsp-bash-shellcheck-arguments`. The tuning surface is
+thin; the two flags worth setting:
+
+- **`-x`** — follow `source` statements into other files. Without it, shellcheck
+  treats sourced files as opaque and cannot check across file boundaries.
+- **`-s bash`** — lock the target shell dialect so shellcheck does not flag
+  bash-isms as POSIX portability warnings.
+
+The idiomatic project-level approach is a `.shellcheckrc` file at the repo root;
+`lsp-bash-shellcheck-arguments` sets the global default for files that lack one.
+
+#### Zsh coverage
+
+Josiah identified himself as a long-time oh-my-zsh user and directed that zsh
+editing support be included — a scope expansion beyond the original Shell step.
+
+A web search confirmed that **no mature zsh LSP server exists**. The
+`bash-lsp/bash-language-server` issue #252 (open, unresolved) tracks the request
+for zsh syntax support. shellcheck explicitly does not support zsh, which
+eliminates the diagnostic backend that any zsh LSP would need. The situation is
+unlikely to change without a new analysis engine being written from scratch.
+
+`sh-mode` (built into Emacs) already handles zsh files — it is a multi-shell
+mode that sets `sh-shell` to `'zsh` when it detects a zsh shebang. For dotfiles
+(`.zshrc`, `.zshenv`, etc.) that carry no shebang, `sh-mode` has no way to
+determine the shell and falls back to generic highlighting. The fix is a
+lightweight derived mode:
+
+```elisp
+(define-derived-mode zsh-mode sh-mode "ZSH"
+  (sh-set-shell "zsh"))
+```
+
+This ensures zsh syntax rules apply regardless of whether a shebang is present,
+labels the modeline "ZSH", and inherits all `sh-mode` hooks. A separate
+`zsh-mode` MELPA package does not exist in a maintained form; writing the three
+lines directly is the equivalent.
+
+Josiah also directed inclusion of **zshdb** — a gdb-like debugger for zsh
+scripts. zshdb 1.1.4 was released March 2024 (maintenance mode, not abandoned).
+Its Emacs integration is through **realgud**, not dap-mode — a separate debugger
+framework invoked via `M-x realgud:zshdb`. zshdb support is built into realgud
+(no separate package). realgud is pure Emacs Lisp; neither it nor zshdb
+meaningfully affects container size.
+
+#### Shell configuration extracted to shell.el
+
+Josiah proposed extracting all shell-related configuration into a dedicated
+`shell.el` rather than inlining it in `config.el`. This mirrors the keybinding
+file pattern already established and keeps `config.el` as an index of `load!`
+calls rather than implementation. The boundary:
+
+- **`shell.el`** — `zsh-mode` derived mode definition, `auto-mode-alist`
+  associations, `lsp-bash-shellcheck-arguments`
+- **`sh-keybindings.el`** — keybindings and mode hooks (empty; authored when
+  ready)
+
+For the `auto-mode-alist` entries, the first proposal was to write out a full
+`add-to-list` call per file extension pattern. Josiah countered with a functional
+approach: curry `add-to-list` after `'auto-mode-alist` and fold over the list of
+patterns. That instinct prompted a recommendation of `mapc` as the correct
+Elisp tool — it applies a function to each element of a list for side effects and
+discards the return values. `dolist` was also raised as the idiomatic Lisp
+alternative: an explicit loop construct that needs no lambda wrapper and reads as
+plain iteration. Josiah chose `dolist` for its syntactic cleanliness — the absence
+of the lambda wrapper makes the intent obvious without requiring the reader to
+know `mapc`.
+
+File patterns registered to `zsh-mode`: `*.zsh`, `*.zsh-theme`, `*.plugin.zsh`,
+`.zshrc`, `.zshenv`, `.zprofile`, `.zlogin`, `.zlogout`.
+
+Josiah wrote `packages.el` and `shell.el` himself. He noted that writing even
+small `(package! ...)` declarations himself helps internalize Doom's architecture.
+
+#### Changes
+
+**Dockerfile:**
+- New apt group `# --- shell ide ---`: `nodejs`, `npm`, `shellcheck`, `zshdb`
+- New `RUN npm install -g bash-language-server@5.6.0` step (runs as root, before
+  user switch; installs to `/usr/local/bin`)
+- `COPY shell.el` added alongside the keybinding file COPY block
+
+**`init.el`:** `(sh +lsp)` added to `:lang`
+
+**`shell.el`:** New file. `define-derived-mode zsh-mode`, `dolist` loop for
+`auto-mode-alist`, `lsp-bash-shellcheck-arguments` set to `"-x -s bash"`.
+
+**`packages.el`:** `(package! realgud)` — written by Josiah.
+
+**`config.el`:** `(load! "shell")` and `(load! "sh-keybindings")` added under a
+separator comment block.
+
+No build attempted yet. `sh-keybindings.el` is empty and will remain so until
+keybindings are authored.
+
+---
+
+### 2026-05-06 — shell.el expanded: bash-mode, ksh-mode, shellcheck flag revision, refactoring
+
+#### Bash and ksh coverage
+
+The shell step was extended beyond zsh to cover bash and ksh dotfiles explicitly.
+The decision driver: `lsp-bash-shellcheck-arguments "-x -s bash"` overrides
+shellcheck's shebang-based auto-detection globally. A ksh script with `#!/bin/ksh`
+would be analyzed as bash, with ksh-specific syntax reported as errors. The fix
+required reconsidering the `-s` flag before the derived-mode design could be
+settled.
+
+**`-s bash` dropped; `-x` retained.** Without `-s`, shellcheck reads the shebang
+and uses the correct dialect per file. The tradeoff: dotfiles without shebangs
+fall back to shellcheck's default (`sh` dialect), which would flag bash-specific
+syntax in `.bashrc` as POSIX warnings. The mitigation is shellcheck's own
+per-file annotation — `# shellcheck shell=bash` near the top of a dotfile — or a
+user-level `.shellcheckrc`. This is more correct for a multi-shell IDE than
+forcing bash globally.
+
+`bash-mode` and `ksh-mode` derived modes were added parallel to `zsh-mode`, each
+calling `sh-set-shell` with the appropriate shell. This is the Emacs-side fix —
+correct syntax highlighting and indentation for dotfiles without shebangs.
+Shellcheck's dialect is handled separately via shebang detection or per-file
+annotations. The two concerns are independent.
+
+A copy-paste bug was caught during this pass: the original ksh `dolist` block
+registered patterns to `'zsh-mode` instead of `'ksh-mode`. Fixed as part of the
+rewrite.
+
+`.profile` was explicitly excluded from the ksh patterns — it is typically written
+to be POSIX sh-compatible and shared across shells; mapping it to `ksh-mode` would
+be inaccurate.
+
+#### Refactoring: extract function, then outer loop
+
+With three `dolist` blocks following the identical pattern — iterate patterns,
+call `add-to-list 'auto-mode-alist` — Josiah identified the repetition and
+proposed an extract-function refactoring. The extracted function:
+
+```elisp
+(defun register-shell-file-patterns (patterns mode)
+  (dolist (file-extension-pattern patterns)
+    (add-to-list 'auto-mode-alist (cons file-extension-pattern mode))))
+```
+
+After writing the three call sites, Josiah pushed further: replace the three
+separate calls with a single loop over a data structure mapping each mode to its
+patterns. The structure that makes this work is a list of lists — mode symbol as
+`car`, pattern list as `cdr`:
+
+```elisp
+'((bash-mode "\\.bash\\'" "\\.bashrc\\'" ...)
+  (zsh-mode  "\\.zsh\\'" ...)
+  (ksh-mode  "\\.ksh\\'" ...))
+```
+
+`car` extracts the mode, `cdr` extracts the already-correct pattern list —
+no reshaping needed before passing to `register-shell-file-patterns`. `dolist`
+was chosen over `mapc` for the outer loop, consistent with the earlier preference:
+no lambda wrapper, intent reads as plain iteration.
+
+The commented-out superseded code was deleted rather than preserved. Rationale:
+git history and editor undo both make the old code recoverable; dead commented
+code is noise.
+
+#### Final shape of shell.el
+
+Three `define-derived-mode` blocks grouped at the top. One `defun`. One `dolist`
+outer loop over the shell configuration data structure. `lsp-bash-shellcheck-arguments`
+updated to `"-x"`.
+
+**`shell.el`** updated: `bash-mode` and `ksh-mode` derived modes added;
+`register-shell-file-patterns` function extracted; three `dolist` blocks collapsed
+to one outer loop; `-s bash` dropped from shellcheck arguments.
+
+---
+
+### 2026-05-06 — sh-keybindings.el authored; shell step complete
+
+`sh-keybindings.el` was written to close out the shell step. Bindings sit on
+`sh-mode-map` and therefore apply to all derived modes (`bash-mode`, `zsh-mode`,
+`ksh-mode`) without additional wiring.
+
+The file opens with a reference comment block documenting the Doom/LSP defaults
+already active in shell buffers — `g d` (go to definition), `g D` (find
+references), `K` (hover), `] d` / `[ d` (next/prev diagnostic), `SPC c a` (code
+actions), `SPC b c` (flycheck buffer from config.el global). The rationale:
+one source of truth for discovering language-specific keybindings rather than
+hunting through Doom's documentation.
+
+Localleader bindings added under `SPC m`:
+
+| Chord      | Description          | Function                                    |
+|------------|----------------------|---------------------------------------------|
+| `SPC m e e` | Execute region      | `sh-execute-region`                         |
+| `SPC m e b` | Execute buffer      | `sh-execute-region` on `(point-min)`→`(point-max)` via `cmd!` |
+| `SPC m r r` | Rename symbol       | `lsp-rename`                                |
+| `SPC m d d` | Start debugger      | `realgud:zshdb`                             |
+| `SPC m s s` | Switch shell dialect | `sh-set-shell`                              |
+
+`cmd!` (Doom's macro for wrapping a form into an interactive command) used for
+execute-buffer to avoid a named `defun` for a one-liner.
+
+The debugger binding notes `realgud:bashdb` as the bash equivalent in a comment.
+The dispatch gap (binding sits on `sh-mode-map`, invokes zshdb in all shell
+buffers) is a known issue deferred to a future pass when `bashdb` is added to the
+image.
+
+**Shell step status: configuration complete. Build and verification pending.**

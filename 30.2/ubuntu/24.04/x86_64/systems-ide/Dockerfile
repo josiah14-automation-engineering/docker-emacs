@@ -100,6 +100,11 @@ RUN apt-get update -y && \
       libtree-sitter0 \
       libxml2 \
       zlib1g \
+      `# --- shell ide ---` \
+      nodejs \
+      npm \
+      shellcheck \
+      zshdb \
       `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
@@ -107,6 +112,8 @@ RUN apt-get update -y && \
       fonts-firacode \
       fonts-jetbrains-mono \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g bash-language-server@5.6.0
 
 RUN userdel ubuntu || true \
     && groupadd -g ${USER_GID} ${USERNAME} \
@@ -143,6 +150,7 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
 COPY --chown=${USERNAME}:${USERNAME} config.el          /home/${USERNAME}/.config/doom/config.el
 COPY --chown=${USERNAME}:${USERNAME} init.el            /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el        /home/${USERNAME}/.config/doom/packages.el
+COPY --chown=${USERNAME}:${USERNAME} shell.el               /home/${USERNAME}/.config/doom/shell.el
 COPY --chown=${USERNAME}:${USERNAME} sh-keybindings.el     /home/${USERNAME}/.config/doom/sh-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} c-keybindings.el      /home/${USERNAME}/.config/doom/c-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} rust-keybindings.el   /home/${USERNAME}/.config/doom/rust-keybindings.el
