@@ -20,3 +20,5 @@
        :desc "Start debugger" "d" #'realgud:zshdb)
       (:prefix ("s" . "shell")
        :desc "Switch shell dialect" "s" #'sh-set-shell))
+
+(provide 'sh-keybindings)
