@@ -17,6 +17,7 @@ ARG EMAIL
 ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
 ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
 ARG POWERLINE_FONTS_COMMIT=a029626780dd4af32f15a3e708a5b00528c22f1d
+ARG ZSHDB_VERSION=1.1.4
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -101,10 +102,13 @@ RUN apt-get update -y && \
       libxml2 \
       zlib1g \
       `# --- shell ide ---` \
+      autoconf \
+      automake \
+      make \
       nodejs \
       npm \
       shellcheck \
-      zshdb \
+      zsh \
       `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
@@ -112,6 +116,14 @@ RUN apt-get update -y && \
       fonts-firacode \
       fonts-jetbrains-mono \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${ZSHDB_VERSION}" https://github.com/rocky/zshdb.git /tmp/zshdb \
+    && cd /tmp/zshdb \
+    && ./autogen.sh \
+    && ./configure \
+    && make \
+    && make install \
+    && rm -rf /tmp/zshdb
 
 RUN npm install -g bash-language-server@5.6.0
 

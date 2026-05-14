@@ -319,6 +319,24 @@ Use these standard markers in comments:
 > - [bbatsov/emacs-lisp-style-guide](https://github.com/bbatsov/emacs-lisp-style-guide): `with-eval-after-load`, annotation conventions
 > - [Doom Emacs Discourse — Style](https://discourse.doomemacs.org/t/style/3723): Doom-specific macro conventions
 
+### 11.5 End every loadable file with `(provide 'feature-name)`
+
+Every `.el` file that is loaded via `load!` or could ever be loaded via `require` should end with a `provide` call matching its filename (without the `.el` extension):
+
+```elisp
+;;; shell.el -*- lexical-binding: t; -*-
+...
+(provide 'shell)
+```
+
+Doom's `load!` macro uses `load` directly and does not consult the `features` list, so `provide` is not mechanically required for Doom configs. However, it is the standard Emacs contract for self-contained feature files: it registers the feature so `require` calls are idempotent and so tooling (byte-compiler, `checkdoc`, LSP) recognizes the file as a complete unit rather than a fragment.
+
+The rule: if the file has a `;;; filename.el` header, it gets a `(provide 'filename)` footer.
+
+> **Sources:**
+> - [GNU Emacs Lisp Reference Manual — Named Features](https://www.gnu.org/software/emacs/manual/html_node/elisp/Named-Features.html)
+> - [bbatsov/emacs-lisp-style-guide](https://github.com/bbatsov/emacs-lisp-style-guide): *"Each file should provide a named feature."*
+
 ---
 
 ## 12. Formatting and Indentation
@@ -363,6 +381,7 @@ Prefer the right-column form:
 All sources cited in this guide, for direct re-access:
 
 ### Elisp-specific
+- [GNU Emacs Lisp Reference Manual — Named Features](https://www.gnu.org/software/emacs/manual/html_node/elisp/Named-Features.html)
 - [GNU Emacs Lisp Reference Manual — Coding Conventions](https://www.gnu.org/software/emacs/manual/html_node/elisp/Coding-Conventions.html)
 - [GNU Emacs Lisp Reference Manual — Defining Variables](https://www.gnu.org/software/emacs/manual/html_node/elisp/Defining-Variables.html)
 - [GNU Emacs Lisp Reference Manual — Lexical Binding](https://www.gnu.org/software/emacs/manual/html_node/elisp/Lexical-Binding.html)

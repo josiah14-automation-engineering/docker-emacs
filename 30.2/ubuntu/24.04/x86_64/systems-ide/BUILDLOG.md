@@ -488,3 +488,47 @@ buffers) is a known issue deferred to a future pass when `bashdb` is added to th
 image.
 
 **Shell step status: configuration complete. Build and verification pending.**
+
+---
+
+### 2026-05-13 — First build attempt; zshdb not in Ubuntu 24.04 apt repos
+
+First build attempt surfaced `E: Unable to locate package zshdb`. The `zshdb` package exists in Ubuntu's universe repo up through focal (20.04) but is absent from noble (24.04). No PPA with 24.04 coverage was found.
+
+**Resolution: install zshdb from source.** The upstream repo is `github.com/rocky/zshdb`. Build steps follow the standard autotools pattern: `./autogen.sh && ./configure && make && make install`.
+
+**Dockerfile changes:**
+- `ZSHDB_VERSION=1.1.4` ARG added to the header block (pinned to the latest release tag; to be hardened to a commit SHA once the build is confirmed clean)
+- `zshdb` removed from the apt list
+- `autoconf`, `automake`, and `zsh` added to the shell IDE apt group (`autoconf`/`automake` for the build; `zsh` required by zshdb's configure step)
+- New `RUN` step added before the npm install: clone at tag, `autogen.sh`, `configure`, `make`, `make install`, cleanup
+- `make` added to the shell IDE apt group (missing build dep surfaced by the build)
+
+**Image built successfully.**
+
+---
+
+### 2026-05-13 — Shell step verified
+
+Josiah ran the container and tested shell scripting support. All capabilities confirmed working:
+
+- **LSP completions** — bash-language-server providing completions and hover docs
+- **Context awareness** — local variables inside functions detected; parameter signatures surfaced on function calls
+- **Unused variable detection** — shellcheck flagged unused `src` and `dest` when omitted
+- **SC2155** — shellcheck correctly warned on combined `local dest=$(...)` declare-and-assign; fix is to separate the `local` declaration from the assignment
+- **Source following** — `-x` flag working; shellcheck follows `source ./lib.sh` and resolves symbols defined in sourced files
+- **Shell dialect detection** — bash-language-server detected the bash shebang automatically; LSP prompted for project import on first open
+
+**Shell step status: complete.**
+
+---
+
+### 2026-05-13 — run.sh created
+
+`run.sh` written for launching the GUI Emacs container. Key decisions:
+
+- X11 forwarding via `-e DISPLAY`, `/tmp/.X11-unix` mount, and `--ipc host` (shared memory for clipboard)
+- `~/Development/personal` mounted at the same path as the host, consistent with the FaradAI layout pattern
+- `.gitconfig` mounted read-only
+- `MARCH` ARG respected so the image tag matches the build target
+- No resource limits — not necessary for a personal containerized code editor at this stage
