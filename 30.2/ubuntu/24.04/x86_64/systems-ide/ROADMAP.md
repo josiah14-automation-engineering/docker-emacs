@@ -80,7 +80,35 @@ See DECISIONLOG.md. Future goenv support tracked in [#20](https://github.com/jos
 
 ---
 
-## Step 3: Nushell — [#3](https://github.com/josiah14-automation-engineering/docker-emacs/issues/3)
+## Step 3: Nix — [#10](https://github.com/josiah14-automation-engineering/docker-emacs/issues/10)
+
+Prioritized above Nushell and systems languages — full Nix installation needed to support
+projects using nix flakes. See GitHub issue for full decisions and rationale.
+
+**Dockerfile:**
+- Before user switch: `mkdir -m 0755 /nix && chown ${USERNAME}:${USERNAME} /nix`
+- Nix block after Doom install (grouped, ARG-controlled for clean cache invalidation):
+  - Download and verify Nix installer at pinned `NIX_VERSION`
+  - `sh nix-install --no-daemon`
+  - `ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"`
+  - Write `experimental-features = nix-command flakes` to `~/.config/nix/nix.conf`
+  - `nix profile install nixpkgs#nil nixpkgs#nix-direnv`
+  - Wire `~/.config/direnv/direnvrc` to source nix-direnv
+
+**init.el:**
+- Add `(nix +lsp)` to `:lang` (`+lsp` required — module only wires lsp! under that flag)
+
+**config.el:**
+- Add `(load! "nix-keybindings")`
+
+**Verify:**
+- `nix --version` and `nil --version` inside the container
+- Open a `.nix` file; confirm nil provides completions and go-to-definition
+- Open a project with `flake.nix` + `.envrc` using `use flake`; confirm direnv activates
+
+---
+
+## Step 4: Nushell — [#3](https://github.com/josiah14-automation-engineering/docker-emacs/issues/3)
 
 Prioritized above the systems languages — support scripts in the FaradAI rewrite
 target Nu. Doom has no native Nushell module; requires manual wiring. `nu --lsp`
@@ -127,7 +155,7 @@ is the built-in LSP server (available since Nu 0.85).
 
 ---
 
-## Step 4: C — [#4](https://github.com/josiah14-automation-engineering/docker-emacs/issues/4)
+## Step 5: C — [#4](https://github.com/josiah14-automation-engineering/docker-emacs/issues/4)
 
 **Dockerfile:**
 - Add `gcc clangd gdb` to the apt list
@@ -149,7 +177,7 @@ Run `M-x dap-debug` with a gdb configuration to confirm debugging works.
 
 ---
 
-## Step 5: C++ — [#5](https://github.com/josiah14-automation-engineering/docker-emacs/issues/5)
+## Step 6: C++ — [#5](https://github.com/josiah14-automation-engineering/docker-emacs/issues/5)
 
 C++ is covered by the same `:lang (cc +lsp)` module as C. No Doom or Dockerfile
 changes needed if Step 4 is complete. This step is about verifying and configuring:
@@ -166,7 +194,7 @@ project to confirm `compile_commands.json`-based navigation works across files.
 
 ---
 
-## Step 6: Rust — [#6](https://github.com/josiah14-automation-engineering/docker-emacs/issues/6)
+## Step 7: Rust — [#6](https://github.com/josiah14-automation-engineering/docker-emacs/issues/6)
 
 Rust requires rustup, which installs to `~/.cargo` as the runtime user. This means
 the install runs in the final image as the user, after the user switch.
@@ -194,7 +222,7 @@ into std, and flycheck errors. Run `rustc --version` inside the container.
 
 ---
 
-## Step 7: Zig — [#7](https://github.com/josiah14-automation-engineering/docker-emacs/issues/7)
+## Step 8: Zig — [#7](https://github.com/josiah14-automation-engineering/docker-emacs/issues/7)
 
 Zig requires a separate build stage to isolate the toolchain download.
 
@@ -223,7 +251,7 @@ Zig requires a separate build stage to isolate the toolchain download.
 
 ---
 
-## Step 8: CMake — [#8](https://github.com/josiah14-automation-engineering/docker-emacs/issues/8)
+## Step 9: CMake — [#8](https://github.com/josiah14-automation-engineering/docker-emacs/issues/8)
 
 Natural addition after C/C++. Lightweight — cmake-language-server is a pip package.
 
@@ -241,7 +269,7 @@ Natural addition after C/C++. Lightweight — cmake-language-server is a pip pac
 
 ---
 
-## Step 9: Lua — [#9](https://github.com/josiah14-automation-engineering/docker-emacs/issues/9)
+## Step 10: Lua — [#9](https://github.com/josiah14-automation-engineering/docker-emacs/issues/9)
 
 Lua is embedded in nginx, Redis, Neovim config, and embedded firmware.
 lua-language-server is distributed as a pre-built binary.
@@ -260,28 +288,6 @@ lua-language-server is distributed as a pre-built binary.
 
 **Verify:** Open a `.lua` file; confirm completions. Run `lua5.4 --version`
 and `lua-language-server --version` inside the container.
-
----
-
-## Step 10: Nix — [#10](https://github.com/josiah14-automation-engineering/docker-emacs/issues/10)
-
-Installs only the `nil` LSP binary — not the Nix daemon. Static analysis of
-Nix expressions works without a running Nix installation.
-
-**Dockerfile:**
-- Download `nil` binary from GitHub releases:
-  https://github.com/oxalica/nil/releases
-  Pin version and sha512; install to `/usr/local/bin`
-
-**init.el:**
-- Add `nix` to `:lang`
-
-**config.el:**
-- Add `(load! "nix-keybindings")`
-
-**Verify:** Open a `.nix` file; confirm nil provides completions and go-to-definition
-within the file. Note: cross-file resolution requires a Nix flake/nixpkgs context
-mounted from the host.
 
 ---
 

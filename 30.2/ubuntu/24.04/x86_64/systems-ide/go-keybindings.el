@@ -71,13 +71,27 @@
            (message "Playground URL: %s" url)))) ;; prints to bottom minibuffer
     (call-interactively #'+go/playground)))
 
+;; This needs to happen in an after! block because the default mapping in go-mode
+;; for SPC m h . is wired inside `+go-common-config` which is called from
+;; `use-package! go-mode :config`, which runs lazily when a .go file is first
+;; opened. This causes the go layer's default binding to overwrite any override
+;; on that keybinding we set, here.
+(after! go-mode
+  (map! :map go-mode-map
+        :localleader
+        (:prefix ("h" . "help")
+         :desc "Hover docs" "." #'lsp-describe-thing-at-point)))
+
+;; Note: K is kept by convention — it is the default LSP hover key in Doom.
+;; k (lowercase) is also bound here as an easier-to-type alias; go-mode's
+;; localleader map leaves k unbound, though note that k retains its normal-mode
+;; evil meaning (cursor up) outside the localleader context.
 (map! :map go-mode-map
       :localleader
       :desc "Playground (copy url)"  "e" #'+go/playground-yank
       :desc "Add import"            "I" #'go-import-add
+      :desc "Hover docs"            "k" #'lsp-describe-thing-at-point
       :desc "Hover docs"            "K" #'lsp-describe-thing-at-point
-      (:prefix ("h" . "help")
-       :desc "Hover docs"           "." #'lsp-describe-thing-at-point)
       :desc "Lint package"          "l" (cmd! (compile "golangci-lint run ."))
       :desc "Lint all"              "L" (cmd! (compile "golangci-lint run ./..."))
       (:prefix ("p" . "profile")

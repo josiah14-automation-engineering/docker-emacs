@@ -992,3 +992,40 @@ spawning a shell subprocess saw the feature as already provided, skipped the bui
 and left `shell-mode-hook` undefined. Fixed by renaming to `(provide 'systems-ide-shell)`.
 `config.el` uses `(load! "shell")` which loads by filename, not feature name, so no
 other changes were needed.
+
+**`SPC m t g/G/e` confirmed working** — all three gotests bindings verified after fix.
+`gotests` generates stubs correctly; "No tests generated" is expected when all exported
+functions already have coverage.
+
+### 2026-06-05 — performance review: multi-language IDE viability
+
+Reviewed whether supporting the full language stack in a single IDE would degrade
+editor performance. Conclusion: no meaningful Emacs-internal concern.
+
+- **Startup / responsiveness** — unaffected; Doom's lazy loading and AOT compilation
+  mean language support only activates when a relevant file is opened. Installing more
+  modules doesn't increase cold-start time meaningfully.
+- **Simultaneous LSP servers** — each active language runs its own process. gopls and
+  rust-analyzer are the most memory-hungry; in practice multiple languages are rarely
+  active simultaneously.
+- **rust-analyzer** — initial workspace indexing can cause a few seconds of sluggishness
+  on large projects; one-time cost per workspace.
+- **nix-direnv** — first `use flake` evaluation per project hits the network and nix
+  evaluator (seconds); subsequent activations are instant via nix-direnv's cache.
+- **company-nixos-options** — already disabled for idle completion by Doom's nix module
+  (noted in source as "dreadfully slow"); manual invocation only.
+
+**Josiah's call:** splitting Rust and Nix into separate IDEs would not solve these
+issues — the overhead is process-level (LSP server memory, nix evaluation), not elisp
+stepping on itself. A single systems-ide keeps things simple without a real performance
+tradeoff.
+
+---
+
+**`SPC m h .` still calling godef** — `map!` in `go-keybindings.el` runs at startup, but
+Doom's go module wires `h . → godoc-at-point` inside `+go-common-config`, which is called
+from `use-package! go-mode :config`. That `:config` block runs lazily on first `.go` file
+open — after our `map!` — so the module's binding overwrites ours. Fix: move the `h .`
+override into `go-config.el` inside `(after! go-mode ...)`. Since `config.el` registers
+that hook after the module, it runs last and wins. The `(:prefix ("h" . "help") ...)`
+block in `go-keybindings.el` is a no-op and should be removed.

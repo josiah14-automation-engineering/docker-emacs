@@ -41,7 +41,7 @@ before proceeding.
 
 - [x] **`SPC m i`** — jump point to the `import` block.
 
-- [ ] **`SPC m h .`** — position on a stdlib identifier (e.g. `Println`). Expect a
+- [x] **`SPC m h .`** — position on a stdlib identifier (e.g. `Println`). Expect a
   godoc buffer for the symbol.
 
 - [x] **`SPC m I`** — invoke, type `strings`, confirm. Verify the import is added. Undo.
@@ -107,12 +107,12 @@ Requires `flight-test_test.go` with table-driven tests and benchmarks.
 
 - [x] **`SPC m t t`** — rerun the last test without moving point.
 
-- [ ] **`SPC m t g`** — position on `Untested` (an exported function with no test).
+- [x] **`SPC m t g`** — position on `Untested` (an exported function with no test).
   Expect a stub `TestUntested` generated into a `_test.go` buffer.
 
-- [ ] **`SPC m t G`** — generate stubs for all exported symbols that lack tests.
+- [x] **`SPC m t G`** — generate stubs for all exported symbols that lack tests.
 
-- [ ] **`SPC m t e`** — generate stubs for exported symbols only (subset of `G`).
+- [x] **`SPC m t e`** — generate stubs for exported symbols only (subset of `G`).
 
 ---
 
@@ -141,7 +141,7 @@ Requires `flight-test_test.go` with table-driven tests and benchmarks.
 
 ## Playground
 
-- [ ] **`SPC m e`** — with the buffer or a region selected, send to `play.golang.org`.
+- [x] **`SPC m e`** — with the buffer or a region selected, send to `play.golang.org`.
   Expect a browser tab (or URL in the minibuffer) with the snippet.
 
 ---
