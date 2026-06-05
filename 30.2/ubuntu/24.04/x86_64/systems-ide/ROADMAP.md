@@ -35,48 +35,10 @@ Scope expanded from bash/sh to bash, sh, zsh, and ksh. Full details in BUILDLOG.
 
 ---
 
-## Step 2: Go — [#2](https://github.com/josiah14-automation-engineering/docker-emacs/issues/2)
+## ~~Step 2: Go~~ — [#2](https://github.com/josiah14-automation-engineering/docker-emacs/issues/2) ✓ COMPLETE
 
-Prioritized above the systems languages — the FaradAI CLI rewrite (#65) targets
-Go. Full LSP + toolchain needed before that migration work starts.
-
-**Dockerfile:**
-- Add a `go-build` stage to download and verify the toolchain:
-  ```dockerfile
-  FROM ubuntu:24.04 AS go-build
-  ARG GO_VERSION=<pin>
-  ARG GO_SHA256=<pin>
-  RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates curl \
-      && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz \
-      && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
-      && tar -C /usr/local -xzf /tmp/go.tar.gz \
-      && rm /tmp/go.tar.gz
-  ```
-- In the final stage, copy the toolchain and set up PATH:
-  ```dockerfile
-  COPY --from=go-build /usr/local/go /usr/local/go
-  ENV GOPATH=/home/${USERNAME}/go
-  ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
-  ```
-- After the `USER ${USERNAME}` switch, install gopls:
-  ```dockerfile
-  RUN go install golang.org/x/tools/gopls@v<pin>
-  ```
-- `COPY go-keybindings.el`
-
-**init.el:**
-- Add `(go +lsp)` to `:lang` ✓ (already done)
-
-**config.el:**
-- Add `(load! "go-keybindings")`
-
-**Note:** Go version management uses the native Go 1.21+ `toolchain` directive.
-See DECISIONLOG.md. Future goenv support tracked in [#20](https://github.com/josiah14-automation-engineering/docker-emacs/issues/20).
-
-**Verify:**
-- Open a `.go` file; confirm gopls completions, go-to-definition, and flycheck errors
-- Confirm `gofmt` runs on save (Doom's go module enables this with `+lsp`)
-- Run `go version` and `gopls version` inside the container
+Full Go IDE working: gopls, flycheck-golangci-lint, gotests, gorepl, go-tag, playground
+URL yank, all keybindings verified. Flight test 100% checked off. Closed 2026-06-05.
 
 ---
 
