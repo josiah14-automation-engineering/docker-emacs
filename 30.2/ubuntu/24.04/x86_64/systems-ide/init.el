@@ -49,6 +49,7 @@
        :lang
        data
        emacs-lisp
+       (go +lsp)
        json
        markdown
        org

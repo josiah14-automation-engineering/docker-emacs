@@ -3,6 +3,16 @@ ARG MTUNE=skylake
 
 FROM josiah14/emacs:30.2-${MARCH}-ubuntu-24.04-dev AS emacs-build
 
+FROM ubuntu:24.04 AS go-build
+ARG GO_VERSION=1.26.3
+ARG GO_SHA256=2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556
+RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz \
+    && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 
 # --- Final image ---
 FROM ubuntu:24.04
@@ -17,6 +27,8 @@ ARG EMAIL
 ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
 ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
 ARG POWERLINE_FONTS_COMMIT=a029626780dd4af32f15a3e708a5b00528c22f1d
+ARG NERD_ICONS_COMMIT=1db0b0b9203cf293b38ac278273efcfc3581a05f
+ARG NFM_SHA256=f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60
 ARG ZSHDB_VERSION=1.1.4
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
@@ -27,8 +39,13 @@ ENV TERM=xterm-256color
 ENV NO_AT_BRIDGE=1
 ENV DOOMDIR=/home/${USERNAME}/.config/doom
 ENV PATH="/home/${USERNAME}/.config/emacs/bin:/home/${USERNAME}/.local/bin:${PATH}"
+ENV GOPATH=/home/${USERNAME}/go
+ENV GOAMD64=v3
+ENV GOTOOLCHAIN=auto
+ENV PATH="/usr/local/go/bin:${GOPATH}/bin:${PATH}"
 
 COPY --from=emacs-build /usr/local /usr/local
+COPY --from=go-build /usr/local/go /usr/local/go
 
 RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' \
       > /etc/apt/apt.conf.d/99lean
@@ -138,6 +155,16 @@ USER ${USERNAME}
 ENV USER=${USERNAME}
 ENV HOME=/home/${USERNAME}
 
+# godef omitted: dead project (last release 2020); golang.org/x/tools dep frozen at pre-1.21 panics on Go 1.26+.
+# SPC m h . remapped to lsp-describe-thing-at-point in go-keybindings.el.
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+    | sh -s -- -b "$(go env GOPATH)/bin" v2.11.4 \
+    && go install golang.org/x/tools/gopls@v0.22.0 \
+    && go install github.com/go-delve/delve/cmd/dlv@v1.26.3 \
+    && go install github.com/x-motemen/gore/cmd/gore@v0.6.0 \
+    && go install github.com/fatih/gomodifytags@v1.16.0 \
+    && go install github.com/cweill/gotests/gotests@latest
+
 RUN cd /home/${USERNAME} \
     && git clone https://github.com/powerline/fonts.git \
     && cd fonts \
@@ -152,6 +179,9 @@ RUN cd /home/${USERNAME} \
     && tar xz --strip-components=1 -C ~/.local/share/fonts/truetype/source-code-pro \
          -f /tmp/source-code-pro.tar.gz \
     && rm /tmp/source-code-pro.tar.gz \
+    && curl -fsSL "https://raw.githubusercontent.com/rainstormstudio/nerd-icons.el/${NERD_ICONS_COMMIT}/fonts/NFM.ttf" \
+         -o /home/${USERNAME}/.local/share/fonts/NFM.ttf \
+    && echo "${NFM_SHA256}  /home/${USERNAME}/.local/share/fonts/NFM.ttf" | sha256sum -c - \
     && fc-cache -fv
 
 RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
@@ -171,6 +201,7 @@ COPY --chown=${USERNAME}:${USERNAME} cmake-keybindings.el  /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} lua-keybindings.el    /home/${USERNAME}/.config/doom/lua-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el    /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.config/doom/guile-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 
 RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \
     && sed -i "s/<email-address>/\"${EMAIL}\"/" /home/${USERNAME}/.config/doom/config.el \

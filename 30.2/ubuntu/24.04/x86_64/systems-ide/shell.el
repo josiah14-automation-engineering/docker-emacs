@@ -34,5 +34,5 @@
                             "\\.kshrc\\'")))
   (register-shell-file-patterns (cdr config) (car config)))
 
-(provide 'shell)
+(provide 'systems-ide-shell)
 

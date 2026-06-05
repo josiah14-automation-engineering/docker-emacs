@@ -532,3 +532,463 @@ Josiah ran the container and tested shell scripting support. All capabilities co
 - `.gitconfig` mounted read-only
 - `MARCH` ARG respected so the image tag matches the build target
 - No resource limits — not necessary for a personal containerized code editor at this stage
+
+---
+
+### 2026-05-28 19:59 — Go and Nushell steps prioritized; scaffolding begun
+
+#### Reprioritization
+
+Go (Step 2) and Nushell (Step 3) were pulled ahead of C/C++/Rust/Zig in `TODO.md`.
+The driver: the FaradAI CLI rewrite (#65) targets Go for the main binary and Nushell
+for support scripts. Both toolchains need to be available in the systems-ide before
+that migration work starts. All prior step numbers shifted down by two.
+
+Go's entry in the syntax-only batch (now Step 14) was removed — full LSP supersedes
+it.
+
+#### Version pins
+
+| Tool | Version | Hash |
+|---|---|---|
+| Go toolchain | 1.26.3 | SHA256 `2b2cfc7148493da5e73981bffbf3353af381d5f93e789c82c79aff64962eb556` |
+| gopls | v0.22.0 | (installed via `go install`; integrity guaranteed by module proxy) |
+| Nushell | 0.113.0 | SHA256 `6e94ee0035367c471b34dada57a735e55f5613d97ac3fa58c0ef241f22a12ede` |
+
+Nushell musl binary — `nu-0.113.0-x86_64-unknown-linux-musl.tar.gz` — was chosen over the
+glibc release for the same reason as always: statically linked, no libc version
+dependency in the final image.
+
+#### Nushell mode research
+
+`nushell-mode` (`mrkkrp/nushell-mode` on MELPA) is syntax-highlighting only. It derives
+from `prog-mode` via `define-derived-mode`; `nushell-mode-map` is auto-created but
+currently empty. No LSP is built in. LSP is wired manually in `config.el` via
+`lsp-register-client` pointing to `nu --lsp` (the built-in Nushell LSP server,
+available since Nu 0.85). The `(sh +lsp)` module is unrelated — it covers
+bash/zsh/sh/ksh only.
+
+#### Elisp authorship boundary
+
+During this step the collaboration boundary for elisp was restated and sharpened:
+
+- **Josiah writes:** all `map!` keybinding calls, all `config.el` language additions
+  (auto-mode-alist, lsp-register-client, hooks), any elisp config files analogous to
+  `shell.el`
+- **AI produces:** Dockerfile changes, `init.el` module flag additions (e.g.
+  `(go +lsp)`), `packages.el` package declarations, keybinding file reference comment
+  headers
+
+This mirrors the pattern established at scaffolding (2026-05-06): writing even small
+elisp declarations himself helps internalize Doom's architecture. The IDE build is a
+practice, not a deliverable.
+
+Concretely: `go-keybindings.el` and `nu-keybindings.el` were created with only the
+default-bindings reference comment and `provide` — no `map!` calls. The `config.el`
+additions for Nushell LSP registration and `auto-mode-alist` are Josiah's to write.
+
+#### Changes made this session
+
+**`TODO.md`:** Go inserted as Step 2, Nushell as Step 3; all prior steps renumbered.
+
+**`init.el`:** `(go +lsp)` added to `:lang`.
+
+**`packages.el`:** `(package! nushell-mode)` added.
+
+**`go-keybindings.el`:** New file. Reference comment only; `(provide 'go-keybindings)`.
+
+**`nu-keybindings.el`:** New file. Reference comment only; `(provide 'nu-keybindings)`.
+
+**Dockerfile, `config.el`:** Pending — Josiah authors `config.el` additions; Dockerfile
+changes (go-build stage, Nu binary download, gopls install, COPY additions) are AI's
+to write and are next.
+
+---
+
+### 2026-05-28 20:09 — Decision: write Nushell as a proper Doom module; contribute upstream
+
+Rather than wiring Nushell manually in `config.el`, the decision was made to write a
+proper Doom module (`modules/lang/nushell/`) and offer it back to the Doom community.
+No Doom-maintained Nushell module exists; `:lang scad` (PR #7566) confirms new language
+modules are accepted (they land in a "modules backlog" milestone — slow review is
+normal).
+
+#### Research findings
+
+**`nushell-mode`** (`mrkkrp/nushell-mode`, MELPA) — syntax highlighting only; derives
+from `prog-mode`; no built-in LSP; auto-creates `nushell-mode-map`. File pattern:
+`"\\.nu\\'"`.
+
+**`nushell-ts-mode`** (`herbertjones/nushell-ts-mode`, MELPA) — tree-sitter mode; on
+MELPA but less widely used (34 commits). Requires grammar from
+`https://github.com/nushell/tree-sitter-nu` installed via
+`treesit-install-language-grammar`.
+
+**LSP:** `nu --lsp` (built-in since Nu 0.85); no external binary. `lsp-mode` has no
+built-in Nushell client — must use `lsp-register-client` with
+`lsp-stdio-connection '("nu" "--lsp")`.
+
+**Template:** `:lang zig` (`modules/lang/zig/config.el`) — simplest clean example of a
+`+LANG-common-config` helper + `modulep! +lsp` flag pattern + tree-sitter conditional.
+
+**Contributing bar:**
+- Target `master`; package pins required; module documentation required
+- Do-not-PR list moved to `discourse.doomemacs.org/do-not-pr` (login required to read)
+- Contributing guide's "Contributing a new module" section is empty — ask on Doom
+  Discord before opening the PR
+
+Full research captured in `nushell-doom-module.md`.
+
+---
+
+### 2026-05-28 20:14 — Go module research; go-doom-module.md created
+
+Doom's `(go +lsp)` module is far more comprehensive than anticipated. It wires gopls
+auto-start, format-on-save via `:editor format`, a REPL (`gorepl-mode`), struct tag
+management (`go-tag`), test generation (`go-gen-test`), and an extensive local-leader
+binding set covering run/build/clean, tests, benchmarks, generate, and godoc. Full
+binding table in `go-doom-module.md`.
+
+Consequence for systems-ide: `go-keybindings.el` will be sparse (possibly empty beyond
+a reference comment) since the module covers the main use cases. `config.el` addition
+is a single `(load! "go-keybindings")` line.
+
+The one open decision is `golangci-lint` — deferred. gopls staticcheck covers the
+common ground; golangci-lint can be added in a later hardening pass if needed.
+
+Dockerfile work (go-build stage, COPY, ENV, gopls install) is next and is AI's to
+write.
+
+---
+
+### 2026-05-30 — go-keybindings.el completed; binding design finalized
+
+`go-keybindings.el` was fleshed out from a bare reference comment to a complete
+binding file. The design session covered all of `(go +lsp)`'s capability clusters and
+produced a coherent custom binding layer on top of the module defaults.
+
+#### Binding decisions
+
+**`SPC m I` — add import shortcut.** The module's `go-import-add` binding lives at
+`SPC m r i a` — a four-key sequence. `SPC m I` (capital I) provides a direct shortcut,
+pairing with `SPC m i` (goto-imports): lowercase navigates the import block, uppercase
+adds to it. The `SPC m r` prefix is reclaimed for REPL (see below), making the shortcut
+a necessity rather than just convenience.
+
+**`SPC m l` / `SPC m L` — lint.** `l` lints the current package (`golangci-lint run .`);
+`L` lints all packages (`golangci-lint run ./...`). Follows the lowercase/uppercase
+smaller-to-larger-scope pattern established with `i`/`I`. Both run via `compile`, sending
+output to a `*compilation*` buffer. `golangci-lint` is not yet in the image (deferred per
+`go-doom-module.md`); bindings are wired now so the binary drop-in makes them live.
+
+**`SPC m p` — profile/benchmark prefix.** Carries over from the prior scaffolding session.
+Shadows the module's `SPC m t b s/a` to put benchmarks under a dedicated prefix.
+
+**`SPC m r` — REPL prefix.** Shadows the module's `SPC m r` import subtree entirely
+(covered by `SPC m I`). Sub-bindings follow a consistent lowercase=smaller /
+uppercase=larger scope ladder:
+
+| Key | Function | Scope |
+|---|---|---|
+| `SPC m r e` | `gorepl-eval-line` | line |
+| `SPC m r n` | `gorepl-eval-line-goto-next-line` | line + advance |
+| `SPC m r E` | `gorepl-eval-region` | region |
+| `SPC m r r` | `gorepl-run` | bare REPL |
+| `SPC m r R` | `gorepl-run-load-current-file` | REPL + current file |
+
+`gorepl-run-load-current-file` seeds the REPL with the current file's declarations,
+making types and functions available for interactive exploration without re-entering
+them. Gore wraps input in a temporary `main` package and compiles on the fly; `main()`
+side effects don't auto-run — individual functions are called explicitly.
+
+`gorepl-eval-line-goto-next-line` (bound to `n`) was discovered in the gorepl-mode
+source during the design session; it evaluates the current line then advances the cursor,
+useful for stepping through expressions sequentially.
+
+**Note:** All REPL bindings require the `gore` binary (`github.com/x-motemen/gore`),
+which is not yet in the Dockerfile. gopls and dlv are installed; gore is not.
+
+#### Comment trimming
+
+The `go-keybindings.el` reference comment originally included a "LOCAL-LEADER — custom"
+section mirroring the `map!` calls. This was removed: the code is self-documenting and
+the duplicate comment would drift from the code as bindings change. The comment now
+covers only the built-in module bindings — including shadowed ones as signposts pointing
+to their replacements.
+
+---
+
+### 2026-05-30 — Font investigation; all-the-icons fonts added to Dockerfile
+
+#### Background
+
+A broken glyph appeared in the modeline to the left of the LSP rocket/Go-version display.
+Clicking it revealed it was the LSP code action indicator — clicking it opened the
+"Select Code Action" prompt normally. The icon itself was broken, not the feature.
+
+#### Root cause
+
+`lsp-modeline` renders the code action icon via `lsp-icons-all-the-icons-icon`, which
+calls `all-the-icons-octicon "light-bulb"` when `all-the-icons-octicon` is `fboundp`.
+`all-the-icons` is present in the image as a transitive dependency, so the function IS
+bound. lsp-mode therefore bypasses its own `💡` fallback and tries to render using the
+`all-the-icons` octicons font — which was never installed. The result is a broken glyph
+rather than a fallback character.
+
+#### What was tried first
+
+`nerd-icons-install-fonts` (which installs `NFM.ttf`) was added to the Dockerfile. This
+did not fix the icon because lsp-mode's code action indicator uses `all-the-icons`, not
+`nerd-icons`. `NFM.ttf` is the correct font for `nerd-icons` glyphs but has no bearing
+on `all-the-icons` rendering.
+
+The nerd-icons equivalent glyph was identified as `nf-cod-lightbulb` (codicons). A
+config.el override using `lsp-modeline-code-action-icons-enable nil` combined with
+`lsp-modeline-code-action-fallback-icon` was considered but not pursued — lsp-mode
+re-propertizes the fallback string in a way that could strip nerd-icons font metadata.
+
+#### Resolution
+
+All six `all-the-icons` font files installed to `~/.local/share/fonts/` in the fonts
+`RUN` step, each verified with SHA256:
+
+| Font file | SHA256 (first 16 chars) |
+|---|---|
+| `all-the-icons.ttf` | `f0a1ecf206d49af4` |
+| `file-icons.ttf` | `f37a5c02cf028580` |
+| `fontawesome.ttf` | `ae19e2e4c04f2b04` |
+| `material-design-icons.ttf` | `b7f4a3ab562048f2` |
+| `octicons.ttf` | `027e1b2278bd2ea3` |
+| `weathericons.ttf` | `176bda6661f213dd` |
+
+Downloaded from `https://raw.githubusercontent.com/domtronn/all-the-icons.el/master/fonts/`.
+`all-the-icons` is not pinned in Doom's `packages.el` at the locked commit — it arrives
+as a transitive dependency at `master`. The font files are stable binary assets; the
+SHA256s pin them at the versions current as of this build.
+
+#### Status
+
+All-the-icons fonts added to Dockerfile at this point. Icon still not fixed — see
+follow-up entry below.
+
+#### Corrected: invalid `--fonts` flag
+
+The Dockerfile had `doom install -! --aot --fonts`. The `--fonts` flag does not exist
+at the pinned Doom commit (`4e0dbb9`) — confirmed by reading `lisp/cli/install.el`.
+The flag was removed. Font installation is handled entirely by the explicit download
+steps in the fonts `RUN` block.
+
+---
+
+### 2026-05-30 — Code action icon: diagnosis corrected; fixed via config.el
+
+After rebuilding with the all-the-icons fonts, the icon was still broken. In-editor
+diagnosis via `M-:` produced the following:
+
+```
+(fboundp 'all-the-icons-octicon)  →  nil
+(all-the-icons-octicon "light-bulb")  →  void-function error
+(lsp-icons-all-the-icons-icon 'octicon "light-bulb" 'default "💡"
+  'modeline-code-action :v-adjust -0.0575)  →  #("<broken icon>" 0 1 (face default))
+```
+
+#### Revised root cause
+
+`all-the-icons` is not installed at all — Doom has fully migrated to `nerd-icons` at
+the pinned commit and `all-the-icons` is not a transitive dependency of anything in
+this configuration. The prior assumption that `all-the-icons-octicon` was `fboundp`
+was wrong; it was never tested at the time it was made.
+
+Because `all-the-icons-octicon` is void, `lsp-icons-all-the-icons-icon` always falls
+through to `(propertize lsp-modeline-code-action-fallback-icon 'face face)`. The
+fallback is the `💡` emoji (U+1F4A1), which renders as `<broken icon>` in the modeline
+— the terminal output `#("<broken icon>" 0 1 ...)` is the emoji failing to render in
+that context, not a literal string.
+
+The all-the-icons font files added in the previous session are therefore dead weight —
+the package that would use them is absent. They were removed from the Dockerfile and
+their six ARGs were removed from the ARG block.
+
+#### Resolution
+
+`lsp-modeline-code-action-fallback-icon` set to `(nerd-icons-codicon "nf-cod-lightbulb")`
+in `config.el` via `(after! lsp-mode ...)`. The codicon lightbulb is U+EA61, which sits
+in the Unicode private use area. `nerd-icons` registers a fontset mapping for PUA
+codepoints pointing to `NFM.ttf` at startup. When lsp-mode re-propertizes the fallback
+string with `face default`, the character U+EA61 still resolves to `NFM.ttf` via the
+fontset mapping — the face override does not strip fontset entries. The icon renders
+correctly without any `all-the-icons` involvement.
+
+**Confirmed working** after rebuild.
+
+---
+
+### 2026-05-30 — Go tooling: gore, golangci-lint, gomodifytags added to Dockerfile
+
+Three Go binaries were missing from the image, each corresponding to bindings already wired in `go-keybindings.el`:
+
+- **`gore` v0.6.0** — the binary `gorepl-mode` shells out to. Without it, `SPC m r r/R/e/n/E`
+  fails with `"Searching for program: No such file or directory, gore"`. Installed via
+  `go install github.com/x-motemen/gore/cmd/gore@v0.6.0`. gore uses the already-installed
+  `gopls` for code completion; no additional dependencies needed.
+
+- **`golangci-lint` v2.11.4** — backing `SPC m l/L`. Must be installed via the official
+  install script rather than `go install` (the project explicitly warns that `go install`
+  produces a binary with wrong build flags that breaks plugin support). `v2.12.2` was
+  attempted first but its install script checksum verification failed — the downloaded
+  tarball SHA256 did not match the release's `checksums.txt`. Fell back to `v2.11.4`.
+  Note: golangci-lint v2 changed its config file format; existing `.golangci.yml` files
+  written for v1 are not compatible.
+
+- **`gomodifytags` v1.16.0** — backing `SPC m a` (add struct tag) and `SPC m d` (remove
+  struct tag). Plain `go install github.com/fatih/gomodifytags@v1.16.0`.
+
+All three were consolidated into the existing Go tools `RUN` step alongside `gopls` and
+`dlv`, with the golangci-lint install script pipe as the first command (its exit status
+propagates through `&&` to gate the subsequent `go install` calls).
+
+**`SPC m l` / `SPC m L` and `SPC m a` / `SPC m d` confirmed working.**
+
+---
+
+### 2026-05-30 — gorepl-run autoload fix
+
+`SPC m r r` (`gorepl-run`) failed cold with `"Symbol's function definition is void:
+gorepl-run"`. `SPC m r R` (`gorepl-run-load-current-file`) worked, and after running it
+`SPC m r r` worked too — confirming `gorepl-mode` is installed but `gorepl-run` has no
+`;;;###autoload` cookie. `gorepl-run-load-current-file` does have one, so calling it loads
+the whole package and defines `gorepl-run` as a side effect.
+
+Fix: `(require 'gorepl-mode)` added as the first form inside the `cmd!` for the `"r"`
+binding in `go-keybindings.el`. `require` is a no-op once the package is loaded, so
+subsequent invocations pay no cost. The comment block above the REPL bindings was updated
+to document both issues: the missing `(interactive)` on gorepl stubs generally, and the
+missing autoload cookie on `gorepl-run` specifically.
+
+**`SPC m r r` confirmed working cold. NFM.ttf baked into the image correctly — `nerd-icons-install-fonts` no longer needed on first boot.**
+
+---
+
+### 2026-05-30 — flight-tests directory scaffolded; run.sh gains `-f` flag
+
+`flight-tests/go/` added under `systems-ide/` as a per-language flight-test home.
+Mounted at runtime (not baked into the image) so the files stay editable on the host
+without a rebuild.
+
+`run.sh` updated with a `-f lang1,lang2,...` flag that mounts each named language
+subdirectory into `~/flight-tests/<lang>` inside the container. Missing directories
+produce a stderr warning and are skipped rather than aborting. Example:
+
+```
+./run.sh -f go,nu
+```
+
+`flight-tests/go/go.mod` declares `module docker-emacs/systems-ide/flight-tests/go`,
+`go 1.25`, `toolchain go1.25.7`. Declares a version the container doesn't install
+directly (container ships 1.26.x) so gopls version-enforcement and GOTOOLCHAIN=auto
+behaviour are both exercised as part of the flight test.
+
+---
+
+### Next build queue
+
+**1. Install `godef`**
+
+`SPC m h .` (godoc at point) and the default `K` binding both call `godef`, which is not
+in the image. Add to the Go tools `RUN` step:
+
+```dockerfile
+go install github.com/rogpeppe/godef@latest
+```
+
+**2. Install `gotests`**
+
+`SPC m t g/G/e` (generate test stubs) failed with `"Symbol's value as variable is void:
+shell-mode-hook"` — `gotests` binary is missing. Add to the Go tools `RUN` step:
+
+```dockerfile
+go install github.com/cweill/gotests/gotests@latest
+```
+
+**3. Override `K` to LSP hover**
+
+The go-keybindings.el comment already documents `K` as LSP hover, but Doom's go module
+binds it to `godoc-at-point` (godef-backed) instead. Add to `go-keybindings.el`:
+
+```elisp
+:desc "Hover docs" "K" #'lsp-describe-thing-at-point
+```
+
+(under `:map go-mode-map :localleader` — Josiah writes the `map!` call)
+
+**4. `flycheck-golangci-lint` — inline lint diagnostics**
+
+golangci-lint currently only runs on demand (`SPC m l/L`). To surface errors inline on
+save, add the flycheck integration package.
+
+`packages.el`:
+```elisp
+(package! flycheck-golangci-lint)
+```
+
+`config.el` (Josiah writes):
+```elisp
+(use-package! flycheck-golangci-lint
+  :hook (go-mode . flycheck-golangci-lint-setup))
+```
+
+**5. Fix `gorepl-eval-region` double-indentation** — tracked in [#21](https://github.com/josiah14-automation-engineering/docker-emacs/issues/21)
+
+---
+
+### 2026-06-05 — godef incompatible with Go 1.26+; dropped in favour of LSP hover
+
+Items 1–4 from the queue above were implemented and the image rebuilt. During flight
+testing, `SPC m h .` (godoc at point) produced `"godoc: doc: no such package: nil"`.
+Manual invocation confirmed the cause:
+
+```
+godef -f flight-test.go -o <offset>
+# → panic: runtime error: invalid memory address or nil pointer dereference
+#   golang.org/x/tools@v0.0.0-20200226224502-204d844ad48d
+```
+
+`godef@latest` pulls `golang.org/x/tools` frozen at February 2020, which predates Go
+1.21's reorganisation of `internal/goarch`. The nil-pointer panic fires at type-check
+time and cannot be worked around without a new release from upstream. The project has
+had no release since 2020 and is effectively abandoned.
+
+**Fix:** removed `godef` from the Go tools `RUN` step (Dockerfile comment documents the
+reason). `SPC m h .` remapped to `lsp-describe-thing-at-point` in `go-keybindings.el`
+— gopls hover is strictly superior. See DECISIONLOG for full rationale.
+
+**Josiah caught:** the `"Symbol's value as variable is void: shell-mode-hook"` error
+that surfaced when trying to run shell commands from within the editor (`!`) confirmed
+the known `shell-mode-hook` bug is still present; diagnosed independently during this
+session. Josiah also independently reasoned that `SPC m t g/G/e` failures were the same
+bug resurfacing (test commands spawn a shell subprocess), not a missing `gotests` binary
+— to be confirmed after rebuild.
+
+**Josiah adjusted:** `SPC m h .` prefix key changed from uppercase `H` to lowercase `h`
+(`SPC m k` was unbound; `h` is easier to type). Too granular for DECISIONLOG.
+
+**`SPC m e` — playground send remapped to kill-ring yank:** no browser in the container,
+so `+go/playground` can't open play.golang.org. Implemented `+go/playground-yank` in
+`go-keybindings.el`: `let`-binds `browse-url-browser-function` to a lambda that calls
+`kill-new` and `message` instead of opening a browser, then calls `+go/playground` via
+`call-interactively` so region detection works correctly. Josiah walked through the
+implementation unprompted with near-zero elisp background — correctly identified
+`(interactive)`, `let`, `browse-url-browser-function`, `kill-new`, and `message`;
+needed only minor corrections on `&rest _` and `call-interactively`. Josiah authored
+the final code; two minor typos caught in review (`atteempting`, `Payground`) and
+corrected before build. **`SPC m e` confirmed working** — URL copied to kill ring and
+verified live at play.golang.org.
+
+### 2026-06-05 — fix `shell-mode-hook` void variable bug
+
+**Root cause:** `shell.el` used `(provide 'shell)`, shadowing Emacs's built-in
+`shell.el`. Any `(require 'shell)` call triggered by test commands, `:!`, or anything
+spawning a shell subprocess saw the feature as already provided, skipped the built-in,
+and left `shell-mode-hook` undefined. Fixed by renaming to `(provide 'systems-ide-shell)`.
+`config.el` uses `(load! "shell")` which loads by filename, not feature name, so no
+other changes were needed.
