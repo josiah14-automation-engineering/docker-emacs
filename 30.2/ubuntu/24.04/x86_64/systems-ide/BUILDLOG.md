@@ -1026,15 +1026,50 @@ tradeoff.
 
 #### Architecture: nix-source image
 
-The original Step 3 plan called for inlining the Nix install in each IDE Dockerfile.
-Josiah redirected: since Nix is expected in every IDE as a general-purpose dev environment
-tool, the install logic should live in a single published image used as a multi-stage
-COPY source — the same pattern already established for the emacs-build dev image.
+The original Step 3 spec called for inlining the Nix install directly in the
+systems-ide Dockerfile: download installer, run `--no-daemon`, install nil and
+nix-direnv into the profile. The implementation was started when Josiah paused it:
+
+> "let's think about this actually, it may be beneficial for nix to be a reusable
+> stage that can be derived from because I expect actually that most of the IDEs are
+> going to need to have nix integrated since it's a general purpose tool for declaring
+> a dev environment with the system dependencies installed."
+
+Three options were laid out:
+
+**Option A — published base image:** a new intermediate image that IDEs extend via
+`FROM`. Every IDE inherits Nix through the image chain. One place to maintain; clean
+cache behaviour (bumping the base triggers IDE rebuilds, but only from the base layer
+onward). Downside: adds a mandatory publish step to the build chain; changes the
+fundamental FROM relationship for all future IDEs.
+
+**Option B — multi-stage COPY source:** a dedicated nix image used purely as a
+`COPY --from=nix-source` target, exactly like the existing emacs-build dev image.
+IDEs still start `FROM ubuntu:24.04` and compose in the Nix artifacts. No inheritance
+chain; each IDE's final image is built from scratch with Nix content copied in.
+
+**Option C — inline in each Dockerfile:** duplicate the install block per IDE. Version
+bumps touch every Dockerfile; drift is possible over time.
+
+Josiah confirmed Nix belongs in every IDE, which ruled out Option C. The initial
+recommendation was Option A (base image) for its DRY properties. Josiah chose
+**Option B**, explicitly modelling it on the existing dev/ pattern:
+
+> "yah, let's put this in the 30.2 ubuntu 24.04 x86_64 dir under a new nix/ dir and
+> derive from it similarly to how we currently derive from the base emacs image in
+> dev/ under there to get the emacs binary."
+
+The distinction matters: Option A is inheritance (the IDE IS a nix image); Option B
+is composition (the IDE HAS nix content copied into it). Composition preserves the
+existing pattern where every final image starts from a clean `ubuntu:24.04` and only
+the specific binary artifacts are assembled in — apt packages, Emacs binary, Go
+toolchain, and now the Nix store and profile. The nix image is a build-time
+dependency, not a runtime parent.
 
 The new image lives at `30.2/ubuntu/24.04/x86_64/nix/` and produces
-`josiah14/nix:2.33.3-ubuntu-24.04`. IDEs add it as a build stage and COPY `/nix` and
-the relevant home dotfiles rather than re-running the installer. One place to bump
-`NIX_VERSION`; no version drift across IDEs.
+`josiah14/nix:2.33.3-ubuntu-24.04`. IDEs add `FROM josiah14/nix:2.33.3-ubuntu-24.04
+AS nix-source` and COPY `/nix` and the relevant home dotfiles rather than running the
+installer themselves. One place to bump `NIX_VERSION`; no version drift across IDEs.
 
 #### Experimental features
 
