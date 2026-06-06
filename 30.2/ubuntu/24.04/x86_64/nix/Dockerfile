@@ -60,6 +60,7 @@ RUN set -eux \
         nixpkgs#nil \
         nixpkgs#direnv \
         nixpkgs#nix-direnv \
+        nixpkgs#bats \
  && printf 'source $HOME/.nix-profile/share/nix-direnv/direnvrc\n' \
         > ~/.config/direnv/direnvrc \
  && ~/.nix-profile/bin/nix store gc \

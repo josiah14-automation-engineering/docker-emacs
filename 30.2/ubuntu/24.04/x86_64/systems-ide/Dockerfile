@@ -13,6 +13,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certifica
     && rm /tmp/go.tar.gz \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+FROM josiah14/nix:2.33.3-ubuntu-24.04 AS nix-source
 
 # --- Final image ---
 FROM ubuntu:24.04
@@ -151,9 +152,16 @@ RUN userdel ubuntu || true \
     && useradd -u ${USER_UID} -g ${USER_GID} ${USERNAME} \
     && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /nix /nix
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.local/state/nix /home/${USERNAME}/.local/state/nix
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/nix /home/${USERNAME}/.config/nix
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/direnv /home/${USERNAME}/.config/direnv
+
 USER ${USERNAME}
 ENV USER=${USERNAME}
 ENV HOME=/home/${USERNAME}
+
+RUN ln -sf "/home/${USERNAME}/.local/state/nix/profiles/profile" "/home/${USERNAME}/.nix-profile"
 
 # godef omitted: dead project (last release 2020); golang.org/x/tools dep frozen at pre-1.21 panics on Go 1.26+.
 # SPC m h . remapped to lsp-describe-thing-at-point in go-keybindings.el.
@@ -188,6 +196,8 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
     && cd /home/${USERNAME}/.config/emacs && git fetch --all && git reset --hard "${DOOM_COMMIT}" \
     && /home/${USERNAME}/.config/emacs/bin/doom install -! --aot \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
+
+ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 
 COPY --chown=${USERNAME}:${USERNAME} config.el          /home/${USERNAME}/.config/doom/config.el
 COPY --chown=${USERNAME}:${USERNAME} init.el            /home/${USERNAME}/.config/doom/init.el

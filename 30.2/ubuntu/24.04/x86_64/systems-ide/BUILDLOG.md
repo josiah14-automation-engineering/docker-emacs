@@ -1124,3 +1124,58 @@ open — after our `map!` — so the module's binding overwrites ours. Fix: move
 override into `go-config.el` inside `(after! go-mode ...)`. Since `config.el` registers
 that hook after the module, it runs last and wins. The `(:prefix ("h" . "help") ...)`
 block in `go-keybindings.el` is a no-op and should be removed.
+
+---
+
+### 2026-06-06 — Step 3 (Nix): systems-ide Dockerfile rewired; nix module activated
+
+#### Task #3: Dockerfile rewire (single atomic pass)
+
+The prior session's three sloppy revert rejections established the principle: rewire as
+a single atomic edit, not a delete-then-add sequence. Implemented in one pass:
+
+- `FROM josiah14/nix:2.33.3-ubuntu-24.04 AS nix-source` added as the third build stage
+  (after `emacs-build` and `go-build`).
+- `direnv \` removed from the apt list — `direnv` binary arrives via `~/.nix-profile/bin`
+  from the COPY block.
+- `RUN mkdir -m 0755 /nix && chown...` replaced with four `COPY --from=nix-source` lines:
+  `/nix`, `~/.local/state/nix`, `~/.config/nix`, `~/.config/direnv`. All with
+  `--chown=${USERNAME}:${USERNAME}`.
+- `RUN ln -sf "/home/${USERNAME}/.local/state/nix/profiles/profile" "/home/${USERNAME}/.nix-profile"`
+  added after the USER switch. Explicit symlink creation rather than COPY of the symlink
+  itself — Docker COPY's symlink-following behaviour in `--from` context is ambiguous;
+  explicit `ln -sf` is unambiguous.
+- Inline `NIX_VERSION`, `NIX_SHA256`, and `RUN curl` Nix installer block removed.
+  `ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"` kept in place.
+
+Both images must be built with the same `USERNAME` (both `build.sh` files pass
+`--build-arg USERNAME="${USER}"`), so COPY source paths `/home/${USERNAME}/...` align
+with the build ARG in the final stage.
+
+#### Task #4: Doom nix module activated
+
+- `(nix +lsp)` added to `:lang` block in `init.el` (alphabetically between `markdown` and `org`).
+- `(load! "nix-keybindings")` added at the end of the load block in `config.el`.
+
+#### nix-keybindings.el: f/p swap and reference comment
+
+The Doom nix module ships `f → nix-update-fetch` and `p → nix-format-buffer` — the
+inverse of the cross-IDE convention used elsewhere in this image. The file overrides
+them: `f → nix-format-buffer`, `p → nix-update-fetch`.
+
+The reference comment documents the unchanged module defaults (`r`, `s`, `b`, `u`, `o`)
+and the LSP slots added by nil (`g`, `h`, `a`, `r`). The `r` collision between
+`nix-repl-show` and LSP rename is noted: whichever `map!` runs last wins; in practice
+LSP rename takes `r` once lsp-mode is active.
+
+Two comment revisions during authoring: Josiah directed that `f` and `p` be removed from
+the defaults table (they're declared below and the file is the source of truth — no need
+to document what the defaults were). A brief note near the `map!` call marks them
+explicitly as overridden defaults, not unbound or unimplemented bindings.
+
+#### Remaining
+
+- **Task #5** (build) — systems-ide image has not been rebuilt with the rewired Nix layers yet.
+- **Task #6** — BATS smoketest for the nix image.
+- **Flake bindings** — `SPC m l` as a flake prefix (`nix flake check / update / develop`)
+  under discussion; Josiah's inclination is `l` to avoid the shift key.

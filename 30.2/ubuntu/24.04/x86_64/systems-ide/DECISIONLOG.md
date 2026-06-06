@@ -44,3 +44,34 @@ is no different from pulling any other project dependency, and the tradeoff
 - A project requires a Go version older than 1.21 (pre-toolchain-directive era)
 - Offline-only builds become a hard requirement
 - The auto-download behavior causes problems in practice (flaky builds, slow CI)
+
+---
+
+## Nix: SPC m l prefix for flake/REPL; SPC m r freed for LSP rename
+
+**Date:** 2026-06-06
+**Status:** Active
+
+**Decision:** Reserve `SPC m l` as a Nix-tools prefix with four bindings:
+
+| Key | Command | Action |
+|-----|---------|--------|
+| `SPC m l c` | `nix flake check` | Type-check and evaluate all outputs |
+| `SPC m l u` | `nix flake update` | Update all flake inputs in `flake.lock` |
+| `SPC m l d` | `nix develop` | Enter the default dev shell |
+| `SPC m l r` | `nix-repl-show` | Open the Nix REPL |
+
+`SPC m r` is left to LSP rename (the standard Doom refactor slot).
+
+**Rationale:** The Doom nix module binds `SPC m r → nix-repl-show`, which collides with
+nil's LSP rename binding on the same key. LSP rename wins in practice (last `map!` runs
+after module setup). The REPL is not a tight edit-run loop — it's an exploratory tool
+used occasionally — so it doesn't need a top-level slot. Moving it to `SPC m l r` groups
+it with flake operations under a coherent "Nix evaluation" prefix.
+
+`l` was chosen over a shift-key alternative (e.g. `SPC m L`) to avoid the shift key.
+Flake commands — check, update, develop — are the operations most frequently needed in
+a flake-driven project workflow and belong at a single-level prefix rather than buried
+under `SPC m f` (format) or another occupied slot.
+
+**Revisit if:** A dedicated Emacs nix-flake package emerges with its own binding conventions.

@@ -52,6 +52,7 @@
        (go +lsp)
        json
        markdown
+       (nix +lsp)
        org
        (sh +lsp)
        yaml
