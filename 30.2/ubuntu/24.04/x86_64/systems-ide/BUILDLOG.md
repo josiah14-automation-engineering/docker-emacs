@@ -1022,6 +1022,66 @@ tradeoff.
 
 ---
 
+### 2026-06-06 — Step 3 (Nix): nix-source image built and smoketested
+
+#### Architecture: nix-source image
+
+The original Step 3 plan called for inlining the Nix install in each IDE Dockerfile.
+Josiah redirected: since Nix is expected in every IDE as a general-purpose dev environment
+tool, the install logic should live in a single published image used as a multi-stage
+COPY source — the same pattern already established for the emacs-build dev image.
+
+The new image lives at `30.2/ubuntu/24.04/x86_64/nix/` and produces
+`josiah14/nix:2.33.3-ubuntu-24.04`. IDEs add it as a build stage and COPY `/nix` and
+the relevant home dotfiles rather than re-running the installer. One place to bump
+`NIX_VERSION`; no version drift across IDEs.
+
+#### Experimental features
+
+All 19 capability experimental features enabled in `~/.config/nix/nix.conf`. Three
+flags excluded: `no-url-literals` and `read-only-local-store` (opt-in restrictions, not
+capabilities), `daemon-trust-override` (security override). `auto-allocate-uids` and
+`cgroups` are inert in `--no-daemon` mode but harmless to enable.
+
+`printf '%s\n'` with per-line backslash-continuation strings was the first approach;
+it wrote the literal `\` characters into `nix.conf`, producing a parse error on the
+second feature name. Fixed to a single `printf` with the full space-separated list on
+one line — nix.conf has no backslash continuation syntax.
+
+#### Smoketest results (all passing)
+
+- `nix 2.33.3`, `nil 2025-06-13`, `direnv 2.37.1` all on PATH from `~/.nix-profile/bin`
+- `nix.conf` contains all 19 features as a single-line value
+- `nix eval --expr '[1 2 3 4] |> builtins.length'` → `4` (pipe-operators active)
+- `nix flake metadata nixpkgs` resolves, fetches metadata
+- `nix develop` on a test flake with `jq` — shell activates, `SMOKETEST_OK=yes`
+- `direnv allow` + `eval "$(direnv export bash)"` — env exported, `which jq` → nix store path
+
+Two SMOKETEST.md corrections made post-run: grep pattern for symlinks (removed trailing
+`$` anchor); `readlink ~/.nix-profile` expected path updated to
+`~/.local/state/nix/profiles/profile` (Nix 2.33 relocated profiles from
+`/nix/var/nix/profiles/per-user/`).
+
+#### Josiah catches
+
+- **Inline install rejected in favour of nix-source image** — redirected before any
+  Dockerfile work was committed.
+- **Three sloppy revert rejections** — an attempt to "revert" the inline install as a
+  pure deletion (without adding the COPY replacement) would have left the final image
+  without a `direnv` binary, without a `/nix` directory, and without a `~/.nix-profile`.
+  Josiah caught all three separately; each was a correct rejection. Fixed by deferring
+  the systems-ide rewire to a dedicated task rather than treating it as a two-step
+  delete-then-add.
+
+#### Remaining for systems-ide (next session)
+
+- **Task #3** — Dockerfile rewire: add `FROM nix-source`, COPY layers, ENV PATH, remove
+  inline block and `direnv` from apt
+- **Task #4** — `(nix +lsp)` in `init.el`; `(load! "nix-keybindings")` in `config.el`
+- **Task #6** — BATS smoketest for the nix image
+
+---
+
 **`SPC m h .` still calling godef** — `map!` in `go-keybindings.el` runs at startup, but
 Doom's go module wires `h . → godoc-at-point` inside `+go-common-config`, which is called
 from `use-package! go-mode :config`. That `:config` block runs lazily on first `.go` file

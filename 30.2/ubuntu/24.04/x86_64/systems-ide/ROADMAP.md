@@ -45,25 +45,52 @@ URL yank, all keybindings verified. Flight test 100% checked off. Closed 2026-06
 ## Step 3: Nix — [#10](https://github.com/josiah14-automation-engineering/docker-emacs/issues/10)
 
 Prioritized above Nushell and systems languages — full Nix installation needed to support
-projects using nix flakes. See GitHub issue for full decisions and rationale.
+projects using nix flakes.
 
-**Dockerfile:**
-- Before user switch: `mkdir -m 0755 /nix && chown ${USERNAME}:${USERNAME} /nix`
-- Nix block after Doom install (grouped, ARG-controlled for clean cache invalidation):
-  - Download and verify Nix installer at pinned `NIX_VERSION`
-  - `sh nix-install --no-daemon`
-  - `ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"`
-  - Write `experimental-features = nix-command flakes` to `~/.config/nix/nix.conf`
-  - `nix profile install nixpkgs#nil nixpkgs#nix-direnv`
-  - Wire `~/.config/direnv/direnvrc` to source nix-direnv
+**Architecture decision:** Nix is expected in every IDE, not just systems-ide. Rather than
+duplicating the install block in each Dockerfile, Nix is extracted into a standalone
+published image (`josiah14/nix:2.33.3-ubuntu-24.04`) at
+`30.2/ubuntu/24.04/x86_64/nix/`. IDE Dockerfiles derive from it via multi-stage COPY,
+the same pattern used for the emacs-build dev image.
 
-**init.el:**
-- Add `(nix +lsp)` to `:lang` (`+lsp` required — module only wires lsp! under that flag)
+### ✓ nix-source image built and verified (2026-06-06)
 
-**config.el:**
+`30.2/ubuntu/24.04/x86_64/nix/` — Dockerfile, build.sh, run.sh, SMOKETEST.md.
+
+What it contains:
+- Ubuntu 24.04 base, minimal apt deps
+- Runtime user creation (matches host UID/GID via build-arg)
+- Nix 2.33.3 `--no-daemon`, SHA-verified installer
+- All 19 capability experimental features enabled in `~/.config/nix/nix.conf`
+- `nix profile install nixpkgs#nil nixpkgs#direnv nixpkgs#nix-direnv`
+- `~/.config/direnv/direnvrc` wired to source nix-direnv hook
+- `nix store gc` + `nix store optimise` + `rm -rf ~/.cache /nix/var/log` at build end
+
+Smoketest passed: nil, direnv, nix-direnv all verified; flake dev shell end-to-end
+with `nix develop` and direnv + nix-direnv hook both confirmed working.
+
+### Remaining for systems-ide
+
+**Dockerfile (Task #3):**
+- Add `FROM josiah14/nix:2.33.3-ubuntu-24.04 AS nix-source`
+- Remove inline nix install block and `/nix` mkdir; remove `direnv` from apt
+- Add `COPY --from=nix-source --chown=${USER_UID}:${USER_GID}` for:
+  `/nix`, `~/.nix-profile`, `~/.nix-channels`, `~/.local/state/nix`,
+  `~/.config/nix`, `~/.config/direnv`
+- Add `ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"`
+
+**init.el (Task #4):**
+- Add `(nix +lsp)` to `:lang`
+
+**config.el (Task #4):**
 - Add `(load! "nix-keybindings")`
 
-**Verify:**
+**BATS smoketest (Task #6):**
+- Install `nixpkgs#bats` in the nix image alongside nil/direnv/nix-direnv
+- Write `smoketest.bats` in `nix/`; add `--test` flag to `run.sh`
+- SMOKETEST.md stays as human-readable reference
+
+**Verify (after systems-ide rebuild):**
 - `nix --version` and `nil --version` inside the container
 - Open a `.nix` file; confirm nil provides completions and go-to-definition
 - Open a project with `flake.nix` + `.envrc` using `use flake`; confirm direnv activates
