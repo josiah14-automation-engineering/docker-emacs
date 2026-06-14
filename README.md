@@ -87,6 +87,76 @@ Due to limitations in Doom Emacs, a couple of steps can't be automated through t
 
 If icons are still missing after these steps, repeat them once more.
 
+## Nix flake environments
+
+Some IDE images (mercury-ide, 30.2/ubuntu/24.04/x86_64, is the first) bundle a Nix
+install — `nix`, `direnv`, `nix-direnv`, `nil`, `bats` on `~/.nix-profile/bin` — plus
+Doom's `:tools direnv` and `(nix +lsp)` + `:tools lsp` modules. This lets any project
+pin its own toolchain via `flake.nix`, independent of whatever the image happens to
+have baked in. The setup is general — any future IDE that wires in the same `nix-source`
+stage gets this for free.
+
+### Per-project setup
+
+Add an `.envrc` to the project containing:
+
+```
+use flake
+```
+
+This requires the project's `flake.nix` to expose `devShells.${system}.default` (or
+add an explicit attribute path, e.g. `use flake .#mercury`).
+
+### How it works
+
+1. `:tools direnv` (`envrc.el`) is active globally via `envrc-global-mode`.
+2. Opening any file under a directory with `.envrc` triggers direnv, via nix-direnv's
+   caching `direnvrc` (already wired into `~/.config/direnv/`).
+3. `use flake` resolves the flake's devShell, and `envrc.el` overlays its environment
+   buffer-locally — `exec-path`/`process-environment` for that project's buffers now
+   point at the devShell's tools first.
+4. Language tooling that resolves bare command names via `executable-find` (e.g.
+   flycheck-mercury's `mercury-mmc` checker, which invokes plain `"mmc"`) picks up the
+   project's pinned version automatically instead of the image's baked-in one.
+5. `(nix +lsp)` + `:tools lsp` give `nil` (the Nix LSP server) for editing `flake.nix`
+   itself — independent of any project's devShell, since `nil` comes from the image's
+   own `~/.nix-profile/bin`.
+
+### First-time activation
+
+direnv refuses to evaluate an `.envrc` until it's explicitly trusted. In Emacs, run
+`M-x envrc-allow` (equivalent to `direnv allow`) the first time you open a file in a
+project with a new or changed `.envrc`.
+
+### Known limitations
+
+The container runs with `--rm`, and only the project directory is bind-mounted — not
+all of `$HOME`, and not `/nix`. This has two consequences:
+
+- **`direnv allow` doesn't persist across container restarts.** The allow-list lives
+  under `$HOME/.local/share/direnv/`, which isn't bind-mounted, so expect to re-run
+  `M-x envrc-allow` each fresh container session.
+- **The first `nix develop` per session can be slow.** `/nix` is baked into the image
+  at build time, not bind-mounted at runtime, so anything a flake's devShell needs that
+  isn't already in the image's `/nix/store` gets built or fetched into the container's
+  writable layer and is lost on `--rm`. For devShells built from `overrideAttrs`'d
+  packages (not present in any binary cache), this means a from-source rebuild every
+  session.
+
+If either of these becomes too painful in practice, the fix is bind-mounting `/nix`
+and `~/.local/share/direnv` from the host in the IDE's `host/*` run script, so the Nix
+store and direnv trust records persist across container runs.
+
+### Wiring a new IDE for this
+
+1. Add the `nix-source` stage, the `COPY --from=nix-source` block, and the
+   `~/.nix-profile` symlink recreation to the Dockerfile (see mercury-ide's
+   `Dockerfile` for the pattern, including why the symlink has to be recreated).
+2. Add `:tools direnv` and `(nix +lsp)` plus a bare `:tools lsp` to `init.el`.
+3. Copy/adapt `nix-keybindings.el` and load it from `config.el`.
+4. For projects with `git+ssh://` flake inputs, forward the SSH agent and `~/.ssh`
+   in the `host/*` run script (see mercury-ide's `host/logic-languages-ide`).
+
 ## Alternatives
 
 - [flycheck/emacs-cask](https://hub.docker.com/r/flycheck/emacs-cask): minimal Emacs compiled from source with Cask
