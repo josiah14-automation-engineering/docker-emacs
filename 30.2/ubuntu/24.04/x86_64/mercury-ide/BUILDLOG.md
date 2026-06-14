@@ -512,3 +512,55 @@ The name and email address that had been hardcoded in various `config.el` and `b
 git remote add origin <remote-url>
 git push --force origin master
 ```
+
+---
+
+### 2026-06-14
+
+#### Nix wiring: nix-source COPY stage
+
+Added a `nix-source` stage (`FROM josiah14/nix:2.33.3-ubuntu-24.04`) and `COPY --from=nix-source` lines for `/nix`, `~/.local/state/nix`, `~/.config/nix`, and `~/.config/direnv` into the final image — the same pattern systems-ide adopted last month (`b2c7b24`/`d22ba5c`). This gives the image `nix`, `direnv`, `nix-direnv`, `nil`, and `bats` on `~/.nix-profile/bin`.
+
+The nix-source image's installer creates `~/.nix-profile` as a symlink into `~/.local/state/nix/profiles/`, but that symlink itself lives outside the four copied paths, so it doesn't survive the COPY. `ENV PATH` and `~/.config/direnv/direnvrc` (nix-direnv) both assume `~/.nix-profile` exists, so a `ln -sf` recreates it — folded into the existing fonts `RUN` to avoid an extra layer.
+
+#### init.el: (nix +lsp), :tools lsp, shell/term — Josiah-authored
+
+Josiah made the `init.el` edit himself (the established pattern for module-flag changes), changing `nix` to `(nix +lsp)` and doing a broad pass removing long-dead commented-out sections (`:input`, `:email`, `:app`, and a long list of unused `:lang` placeholders).
+
+Two things came out of review:
+
+- **`;;shell` → `shell`, `;;term` removed entirely.** Confirmed intentional — vterm covers the "real terminal" need, and a quick shell-REPL buffer is a separate, often-useful thing.
+- **`(nix +lsp)` without `:tools lsp`.** Doom's `+lsp` flags on language modules depend on `:tools lsp` for `lsp-mode`/`lsp!`/the standard `SPC c ...` and `SPC m g/h/a/r` keybinding scaffolding — and mercury-ide's `:tools` block had no `lsp` module at all (consistent with this repo's CLAUDE.md: "No LSP server exists for Mercury... do not configure `lsp-mode` to activate in `mercury-mode`"). That constraint is about `mercury-mode` specifically, not about banning `:tools lsp` outright. Josiah added bare `lsp` to `:tools` — installs lsp-mode/lsp-ui and the standard scaffolding image-wide without touching `mercury.el`/`metal-mercury-mode`, which still has no `+lsp`.
+
+#### nix-keybindings.el: header convention — Josiah-authored
+
+Adapted from systems-ide's `nix-keybindings.el` (f/p swap so `f` = format; `SPC m l` flake prefix: c=check, u=update, d=develop, r=repl).
+
+First draft had:
+```elisp
+;;; nix-keybindings.el --- Keybindings for the Doom nix module
+;;; nix-keybindings.el -*- lexical-binding: t; -*-
+```
+The `-*- lexical-binding: t; -*-` cookie is only recognized on a file's first line — here it was on line 2, so the file was silently loading with dynamic binding, despite `ELISP-STYLE-GUIDE.md` marking lexical binding mandatory. Josiah fixed it by merging description and cookie onto line 1:
+```elisp
+;;; nix-keybindings.el --- Keybindings for the Doom nix module -*- lexical-binding: t; -*-
+```
+— the standard package-header idiom, also flagged by the elisp linter. Checking systems-ide showed it has two header eras: older files (`nix-keybindings.el`, `sh-keybindings.el`, etc.) use the bare `;;; file.el -*- lexical-binding: t; -*-` form, while newer ones (`global-keybindings.el`, `go-config.el`, `go-keybindings.el`) use the full `--- description` + `Commentary`/`Code`/`ends here` form. Mercury-ide's new file matches the newer convention.
+
+#### config.el / Dockerfile wiring
+
+`config.el`: added `(load! "nix-keybindings")` after `(load! "keybindings")`, and dropped a long-dead commented-out block of Scala-IDE keybinding notes left over from an earlier IDE.
+
+Dockerfile: Josiah added the `COPY ... nix-keybindings.el ...` line alongside the other Doom config files (`keybindings.el`, `mercury.el`, etc.) — this had been left as a follow-up once the file existed.
+
+#### host/logic-languages-ide: SSH agent forwarding (not tracked — host/ is gitignored)
+
+Added `-e SSH_AUTH_SOCK=/ssh-agent`, `-v "${SSH_AUTH_SOCK}:/ssh-agent"`, and a read-only `-v /home/josiah/.ssh:/home/josiah/.ssh:ro` mount, so `nix develop`/direnv inside the container can authenticate `git+ssh://` flake inputs (e.g. PPN95's `mise` dependency) using the host's SSH agent and `known_hosts`. UID match between host and container user (already established via `USER_UID`/`USER_GID`) means the forwarded socket and read-only `~/.ssh` are usable without permission issues.
+
+#### README: new "Nix flake environments" section
+
+Documents the `.envrc` (`use flake`) + nix-direnv + `envrc-allow` workflow, how flycheck-mercury's bare `"mmc"` resolves to a project's pinned toolchain via buffer-local `exec-path`, `(nix +lsp)` + `:tools lsp`/`nil` for editing `flake.nix`, and a checklist for wiring this into future IDE images. Placed at the repo root since the mechanism is general, not Mercury-specific.
+
+#### First real-world test: direnv allow doesn't persist across container restarts
+
+Opening a file under PPN95 in the rebuilt image confirmed a predicted caveat: the container runs with `--rm` and only `/home/josiah/Development` is bind-mounted, so `$HOME/.local/share/direnv/` (direnv's trust records) doesn't survive — `M-x envrc-allow` has to be re-run every fresh container session, not just once. Documented in the README. The `/nix`-store-rebuild-per-session caveat (same root cause — `/nix` is baked in at build time, not bind-mounted) is expected to surface next; the fix for both, if it becomes painful, is bind-mounting `/nix` and `~/.local/share/direnv` from the host in `host/logic-languages-ide`.
