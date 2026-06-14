@@ -93,6 +93,8 @@ RUN curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERS
               mercury-srcdist-${MERCURY_VERSION}.tar.xz.sha512
 
 
+FROM josiah14/nix:2.33.3-ubuntu-24.04 AS nix-source
+
 # --- Final image ---
 FROM ubuntu:24.04
 
@@ -204,11 +206,24 @@ RUN userdel ubuntu || true \
     && useradd -u ${USER_UID} -g ${USER_GID} ${USERNAME} \
     && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
 
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /nix /nix
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.local/state/nix /home/${USERNAME}/.local/state/nix
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/nix /home/${USERNAME}/.config/nix
+COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/direnv /home/${USERNAME}/.config/direnv
+
 USER ${USERNAME}
 ENV USER=${USERNAME}
 ENV HOME=/home/${USERNAME}
 
-RUN cd /home/${USERNAME} \
+ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
+
+# The nix-source image's installer creates ~/.nix-profile as a symlink into
+# ~/.local/state/nix/profiles/, but that symlink itself lives outside the four
+# paths COPYed above, so it doesn't survive into this image. PATH (above) and
+# ~/.config/direnv/direnvrc (source $HOME/.nix-profile/share/nix-direnv/direnvrc)
+# both assume it exists, so recreate it pointing at the profile dir we did copy.
+RUN ln -sf "/home/${USERNAME}/.local/state/nix/profiles/profile" "/home/${USERNAME}/.nix-profile" \
+    && cd /home/${USERNAME} \
     && git clone https://github.com/powerline/fonts.git \
     && cd fonts \
     && git checkout a029626780dd4af32f15a3e708a5b00528c22f1d \
@@ -236,6 +251,7 @@ COPY --chown=${USERNAME}:${USERNAME} init.el     /home/${USERNAME}/.config/doom/
 COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
 COPY --chown=${USERNAME}:${USERNAME} mercury.el      /home/${USERNAME}/.config/doom/mercury.el
 COPY --chown=${USERNAME}:${USERNAME} keybindings.el /home/${USERNAME}/.config/doom/keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} straight-versions.el \
      /home/${USERNAME}/.config/emacs/.local/straight/versions/default.el
 
