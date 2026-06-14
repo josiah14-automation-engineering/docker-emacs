@@ -1,4 +1,3 @@
-
 ;;; $DOOMDIR/config.el -*- lexical-binding: t; -*-
 
 ;; Place your private configuration here! Remember, you do not need to run 'doom
@@ -89,35 +88,5 @@
 
 (load! "mercury")
 (load! "keybindings")
+(load! "nix-keybindings")
 
-
-;; The below here is kept to just remember how I did keybindings for the Scala IDE
-;;(map!
-;; :leader
-;; :map scala-mode-map
-;; ; Main top-level keys
-;; "= =" #'lsp-format-buffer
-;; "m t" #'lsp-ui-doc-show
-;; "m T" #'lsp-describe-thing-at-point
-;; "m C-t" #'lsp-ui-doc-mode
-
- ; Lens-mode
-;; "m l s" #'lsp-lens-show
-;; "m l h" #'lsp-lens-hide
-;; "m l a" #'lsp-avy-lens
-
- ; DAP debugging mode keys
-;; "m d x" #'dap-delete-session
-;; "m d X" #'dap-delete-all-sessions
-;; "m d s" #'dap-start-debugging
-;; "m d n" #'dap-next
-;; "m d i" #'dap-step-in
-;; "m d o" #'dap-step-out
-;; "m d c" #'dap-continue
-;; "m d b u" #'dap-ui-breakpoints
-;; "m d b L" #'dap-ui-breakpoints-list
-;; "m d b a" #'dap-breakpoint-add
-;; "m d b r" #'dap-breakpoint-delete
-;; "m d b R" #'dap-breakpoint-delete-all
-;; "m d b t" #'dap-breakpoint-toggle
-;; "m d b c" #'dap-breakpoint-condition)
