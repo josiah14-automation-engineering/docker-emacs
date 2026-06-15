@@ -105,6 +105,8 @@ ARG FULLNAME
 ARG EMAIL
 ARG DOOM_REPO=https://github.com/doomemacs/doomemacs
 ARG DOOM_COMMIT=4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57
+ARG NERD_ICONS_COMMIT=1db0b0b9203cf293b38ac278273efcfc3581a05f
+ARG NFM_SHA256=f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -237,6 +239,9 @@ RUN ln -sf "/home/${USERNAME}/.local/state/nix/profiles/profile" "/home/${USERNA
     && tar xz --strip-components=1 -C ~/.local/share/fonts/truetype/source-code-pro \
          -f /tmp/source-code-pro.tar.gz \
     && rm /tmp/source-code-pro.tar.gz \
+    && curl -fsSL "https://raw.githubusercontent.com/rainstormstudio/nerd-icons.el/${NERD_ICONS_COMMIT}/fonts/NFM.ttf" \
+         -o /home/${USERNAME}/.local/share/fonts/NFM.ttf \
+    && echo "${NFM_SHA256}  /home/${USERNAME}/.local/share/fonts/NFM.ttf" | sha256sum -c - \
     && fc-cache -fv
 
 RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \

@@ -86,6 +86,12 @@
 
 (setq vertico-cycle t) ; enables cycling to key past history into fuzzy-matched commands
 
+;; manually set the icon for code actions as it does not render properly by
+;; default
+(after! lsp-mode
+  (setq lsp-modeline-code-action-fallback-icon
+        (nerd-icons-codicon "nf-cod-lightbulb")))
+
 (load! "mercury")
 (load! "keybindings")
 (load! "nix-keybindings")
