@@ -93,7 +93,7 @@ RUN curl -fsSL https://dl.mercurylang.org/release/mercury-srcdist-${MERCURY_VERS
               mercury-srcdist-${MERCURY_VERSION}.tar.xz.sha512
 
 
-FROM josiah14/nix:2.33.3-ubuntu-24.04 AS nix-source
+FROM josiah14/nix:2.34.7-ubuntu-24.04 AS nix-source
 
 # --- Final image ---
 FROM ubuntu:24.04

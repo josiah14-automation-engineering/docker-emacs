@@ -33,6 +33,9 @@ docker run --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro" \
   -v "${HOME}/Development/personal:/home/${USER}/Development/personal" \
+  -v /nix:/nix \
+  -v "${HOME}/.local/state/nix:/home/${USER}/.local/state/nix" \
+  -v "${HOME}/.config/nix:/home/${USER}/.config/nix" \
   -w "/home/${USER}/Development/personal" \
   "${flight_mounts[@]+"${flight_mounts[@]}"}" \
   "josiah14/systems-doom-emacs-ide:30.2-${MARCH}-ubuntu-24.04" &

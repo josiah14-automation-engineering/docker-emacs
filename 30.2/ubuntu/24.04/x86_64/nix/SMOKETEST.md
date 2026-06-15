@@ -4,7 +4,7 @@ Run these inside the container after a successful `./build.sh`. Drop in with `./
 
 **Tools and versions**
 ```bash
-nix --version            # nix (Nix) 2.33.3
+nix --version            # nix (Nix) 2.34.7
 nix-env --version
 nil --version
 direnv --version

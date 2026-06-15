@@ -564,3 +564,29 @@ Documents the `.envrc` (`use flake`) + nix-direnv + `envrc-allow` workflow, how 
 #### First real-world test: direnv allow doesn't persist across container restarts
 
 Opening a file under PPN95 in the rebuilt image confirmed a predicted caveat: the container runs with `--rm` and only `/home/josiah/Development` is bind-mounted, so `$HOME/.local/share/direnv/` (direnv's trust records) doesn't survive — `M-x envrc-allow` has to be re-run every fresh container session, not just once. Documented in the README. The `/nix`-store-rebuild-per-session caveat (same root cause — `/nix` is baked in at build time, not bind-mounted) is expected to surface next; the fix for both, if it becomes painful, is bind-mounting `/nix` and `~/.local/share/direnv` from the host in `host/logic-languages-ide`.
+
+---
+
+### 2026-06-15
+
+#### Host Nix upgrade (2.33.3 → 2.34.7) and NIX_VERSION single source of truth
+
+The host's Nix install was upgraded to 2.34.7 via a new `upgrade-nix.sh` script (`nix/`), prompted by the version drift between the host and the `nix-source` image's pinned `ARG NIX_VERSION=2.33.3`. With the host and `nix-source` now sharing the same `/nix` store (next section), the SQLite schema in `/nix/var/nix/db` has to agree across host and container — a version mismatch here isn't cosmetic, it's a corruption risk.
+
+Reconciling the version surfaced a brittleness Josiah flagged directly: `NIX_VERSION`/`NIX_SHA256` had been duplicated across `nix/Dockerfile`, `nix/build.sh`, `nix/run.sh`, `nix/smoketest.bats`, `nix/SMOKETEST.md`, and the `FROM josiah14/nix:...` lines in both `mercury-ide/Dockerfile` and `systems-ide/Dockerfile` — seven places that all had to agree. Josiah set the design directly: `nix/Dockerfile`'s `ARG NIX_VERSION=` line is the single source of truth; `nix/build.sh` and `nix/run.sh` derive the version from it via `grep` rather than duplicating it; `nix/smoketest.bats`/`nix/SMOKETEST.md` stay hard-coded (a smoketest pinning the version it expects to see is correct, not brittle); and each IDE's `nix-source` `FROM` tag continues to declare its version explicitly — an IDE that needs to stay behind can pin an older tag and keep its own `/nix` store inside the container, committing it until it's ready to move. A floating `josiah14/nix:ubuntu-24.04` tag was floated and dropped (`"ooh, right, eh nvm haha"`) — it would have undermined exactly the per-IDE pinning Josiah wanted.
+
+`nix/Dockerfile` now reads `ARG NIX_VERSION=2.34.7` with the matching `ARG NIX_SHA256`. `mercury-ide/Dockerfile`'s `nix-source` stage now reads `FROM josiah14/nix:2.34.7-ubuntu-24.04`.
+
+#### Host nix.conf / profile parity
+
+Before a bind mount could give the container anything useful, the host's `~/.config/nix/nix.conf` and `~/.local/state/nix/profiles/profile` needed to match what the `nix-source` image had been baking in: the image's `nix.conf` enabled `pipe-operators` (among other experimental features) that the host's didn't, and the image had `nil`, `direnv`, `nix-direnv`, and `bats` on `~/.nix-profile/bin` via the `nix-source` COPY that the host had none of. Josiah verified the host store first (`nix --version`, `nix store ping`, a test `nix shell hello`), added `pipe-operators` to the host's `experimental-features`, and ran `nix profile install nixpkgs#nil nixpkgs#direnv nixpkgs#nix-direnv nixpkgs#bats` on the host directly. With the bind mounts below in place, the host's `nix.conf` and profile are now canonical — the container's baked-in copies are only a first-boot seed.
+
+#### host/logic-languages-ide: /nix, ~/.local/state/nix, ~/.config/nix bind mounts
+
+With host and `nix-source` pinned to the same Nix version, `host/logic-languages-ide` (gitignored, per-IDE launcher) now bind-mounts `/nix`, `~/.local/state/nix`, and `~/.config/nix` from the host alongside the existing `Development` mount. This gives the container the host's `/nix/store` (no more from-source rebuilds for anything already built on the host), the host's `nix.conf`, and the host's `~/.local/state/nix/profiles/profile` (so `nix profile install`s on the host show up in the container's `~/.nix-profile` too).
+
+#### nix-smoketest.bats: new suite verifying the shared store (7 tests)
+
+Added `mercury-ide/nix-smoketest.bats`: `nix --version` matches the host (2.34.7); `nix store info` reports a trusted local store; the bind-mounted `nix.conf` has `pipe-operators` enabled; a `nix eval` using the pipe operator works; `nix profile list` reflects the host's shared profile (`direnv`, `nil`, `bats`); `nil`/`direnv` resolve on `~/.nix-profile/bin`; and a host-built `hello` package is visible in the bind-mounted `/nix/store`.
+
+The first run (on systems-ide, see its BUILDLOG) was 6/7 — `nix-env -q reflects the shared host profile` failed with `error: profile ".../profiles/profile" is incompatible with 'nix-env'; please use 'nix profile' instead`. Josiah ran the diagnostics (`nix-env -q`, `readlink ~/.nix-profile`, `ls .../profiles/`) that pinned it down: the host's current profile generation was created by `nix profile install` (the new JSON-manifest profile manager), and the old imperative `nix-env` can't read that manifest format — a hard format incompatibility, not a path or permissions issue (`nix-env` is effectively deprecated). Fixed by swapping the test to `nix profile list` with the same assertions, applied to both IDEs' suites before either was re-tested. mercury-ide passed 7/7 on its first run with the fixed test.

@@ -30,10 +30,10 @@ EOF
 
 # ── tools ─────────────────────────────────────────────────────────────────────
 
-@test "nix version is 2.33.3" {
+@test "nix version is 2.34.7" {
   run nix --version
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "2.33.3" ]]
+  [[ "$output" =~ "2.34.7" ]]
 }
 
 @test "nil is on PATH" {

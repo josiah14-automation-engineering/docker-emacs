@@ -89,12 +89,12 @@ If icons are still missing after these steps, repeat them once more.
 
 ## Nix flake environments
 
-Some IDE images (mercury-ide, 30.2/ubuntu/24.04/x86_64, is the first) bundle a Nix
-install — `nix`, `direnv`, `nix-direnv`, `nil`, `bats` on `~/.nix-profile/bin` — plus
-Doom's `:tools direnv` and `(nix +lsp)` + `:tools lsp` modules. This lets any project
-pin its own toolchain via `flake.nix`, independent of whatever the image happens to
-have baked in. The setup is general — any future IDE that wires in the same `nix-source`
-stage gets this for free.
+Some IDE images (mercury-ide and systems-ide, both 30.2/ubuntu/24.04/x86_64) bundle a
+Nix install — `nix`, `direnv`, `nix-direnv`, `nil`, `bats` on `~/.nix-profile/bin` —
+plus Doom's `:tools direnv` and `(nix +lsp)` + `:tools lsp` modules. This lets any
+project pin its own toolchain via `flake.nix`, independent of whatever the image happens
+to have baked in. The setup is general — any future IDE that wires in the same
+`nix-source` stage gets this for free.
 
 ### Per-project setup
 
@@ -130,32 +130,64 @@ project with a new or changed `.envrc`.
 
 ### Known limitations
 
-The container runs with `--rm`, and only the project directory is bind-mounted — not
-all of `$HOME`, and not `/nix`. This has two consequences:
+The container runs with `--rm`. `/nix`, `~/.local/state/nix`, and `~/.config/nix` are
+bind-mounted from the host (see "Shared Nix store" below), but the rest of `$HOME` is
+not, so:
 
 - **`direnv allow` doesn't persist across container restarts.** The allow-list lives
   under `$HOME/.local/share/direnv/`, which isn't bind-mounted, so expect to re-run
-  `M-x envrc-allow` each fresh container session.
-- **The first `nix develop` per session can be slow.** `/nix` is baked into the image
-  at build time, not bind-mounted at runtime, so anything a flake's devShell needs that
-  isn't already in the image's `/nix/store` gets built or fetched into the container's
-  writable layer and is lost on `--rm`. For devShells built from `overrideAttrs`'d
-  packages (not present in any binary cache), this means a from-source rebuild every
-  session.
+  `M-x envrc-allow` each fresh container session. If this becomes too painful, the fix
+  is bind-mounting `~/.local/share/direnv` from the host as well.
 
-If either of these becomes too painful in practice, the fix is bind-mounting `/nix`
-and `~/.local/share/direnv` from the host in the IDE's `host/*` run script, so the Nix
-store and direnv trust records persist across container runs.
+### Shared Nix store
+
+mercury-ide (`host/logic-languages-ide`) and systems-ide (`run.sh`) bind-mount three
+paths from the host into the container:
+
+- `/nix` — the Nix store itself
+- `~/.local/state/nix` — profile generations (`~/.nix-profile` resolves into here)
+- `~/.config/nix` — `nix.conf`
+
+The container's `/nix/store`, `nix.conf`, and `~/.nix-profile` are therefore the
+host's, live — not the copies the `nix-source` stage baked in at build time. Those
+baked-in copies still exist as a first-boot seed, but once the bind mounts are active
+they're shadowed.
+
+Consequences:
+
+- **The first `nix develop` per session is no longer slow.** Anything already built on
+  the host — including from-source builds of `overrideAttrs`'d packages not present in
+  any binary cache — is already in the shared `/nix/store`.
+- **Host and container Nix versions must match.** `/nix/var/nix/db` is a SQLite
+  database with a version-specific schema; a container running a different Nix version
+  than whatever last wrote that DB risks corrupting or being unable to read it. Both
+  `mercury-ide/Dockerfile` and `systems-ide/Dockerfile` pin their `nix-source` stage to
+  `josiah14/nix:2.34.7-ubuntu-24.04`, matching the host's Nix 2.34.7. `nix/Dockerfile`'s
+  `ARG NIX_VERSION` is the single source of truth for that image's version —
+  `nix/build.sh`/`nix/run.sh` derive it via `grep` rather than duplicating it. If an IDE
+  needs to stay on an older Nix, pin an older `nix-source` tag and keep that IDE's own
+  `/nix` store inside the container (no host bind mount) until it's ready to move.
+- **The host's `nix.conf` and profile are now canonical.** They need `pipe-operators`
+  in `experimental-features`, and `nil`, `direnv`, `nix-direnv`, `bats` installed via
+  `nix profile install` (not `nix-env` — `nix-env` can't read `nix profile install`'s
+  manifest format).
+
+Verify the shared store from inside either container with `bats nix-smoketest.bats`.
 
 ### Wiring a new IDE for this
 
 1. Add the `nix-source` stage, the `COPY --from=nix-source` block, and the
    `~/.nix-profile` symlink recreation to the Dockerfile (see mercury-ide's
-   `Dockerfile` for the pattern, including why the symlink has to be recreated).
+   `Dockerfile` for the pattern, including why the symlink has to be recreated). Pin
+   `nix-source` to the same Nix version as the host (`nix/Dockerfile`'s
+   `ARG NIX_VERSION`).
 2. Add `:tools direnv` and `(nix +lsp)` plus a bare `:tools lsp` to `init.el`.
 3. Copy/adapt `nix-keybindings.el` and load it from `config.el`.
 4. For projects with `git+ssh://` flake inputs, forward the SSH agent and `~/.ssh`
    in the `host/*` run script (see mercury-ide's `host/logic-languages-ide`).
+5. Bind-mount `/nix`, `~/.local/state/nix`, and `~/.config/nix` from the host in the
+   `host/*`/`run.sh` launcher (see "Shared Nix store" above), and copy/adapt
+   `nix-smoketest.bats` to verify the wiring.
 
 ## Alternatives
 

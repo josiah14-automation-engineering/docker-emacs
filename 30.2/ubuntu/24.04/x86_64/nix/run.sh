@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NIX_VERSION="${NIX_VERSION:-2.33.3}"
 USER="$(whoami)"
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+NIX_VERSION="$(grep -m1 '^ARG NIX_VERSION=' "${SCRIPT_DIR}/Dockerfile" | cut -d= -f2)"
 
 if [[ "${1:-}" == "--test" || "${1:-}" == "-t" ]]; then
   docker run --rm \

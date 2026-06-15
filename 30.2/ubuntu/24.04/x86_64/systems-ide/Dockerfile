@@ -13,7 +13,7 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certifica
     && rm /tmp/go.tar.gz \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-FROM josiah14/nix:2.33.3-ubuntu-24.04 AS nix-source
+FROM josiah14/nix:2.34.7-ubuntu-24.04 AS nix-source
 
 # --- Final image ---
 FROM ubuntu:24.04

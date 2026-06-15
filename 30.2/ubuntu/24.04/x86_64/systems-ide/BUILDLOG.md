@@ -1179,3 +1179,21 @@ explicitly as overridden defaults, not unbound or unimplemented bindings.
 - **Task #6** — BATS smoketest for the nix image.
 - **Flake bindings** — `SPC m l` as a flake prefix (`nix flake check / update / develop`)
   under discussion; Josiah's inclination is `l` to avoid the shift key.
+
+---
+
+### 2026-06-15 — Shared host Nix store: version bump, bind mounts, smoketest
+
+#### nix-source bumped to 2.34.7 (host version reconciliation)
+
+`systems-ide/Dockerfile`'s `nix-source` stage now reads `FROM josiah14/nix:2.34.7-ubuntu-24.04`, matching the host's Nix upgrade (2.33.3 → 2.34.7) and `nix/Dockerfile`'s new single-source-of-truth `ARG NIX_VERSION`. See mercury-ide's BUILDLOG for the full NIX_VERSION-duplication discussion and Josiah's resulting design: `nix/Dockerfile` pins the version, `nix/build.sh`/`nix/run.sh` derive it via `grep`, and each IDE's `nix-source` `FROM` tag stays an explicit, independently-pinnable declaration (an IDE that needs to stay behind can pin an older tag and keep its own `/nix` store inside the container).
+
+#### run.sh: /nix, ~/.local/state/nix, ~/.config/nix bind mounts
+
+Added the same three bind mounts as mercury-ide's `host/logic-languages-ide`: `-v /nix:/nix`, `-v "${HOME}/.local/state/nix:/home/${USER}/.local/state/nix"`, `-v "${HOME}/.config/nix:/home/${USER}/.config/nix"`, inserted after the `Development/personal` mount and before `-w`. The container now shares the host's `/nix/store`, `nix.conf`, and `~/.nix-profile`-backing profile — the `nix-source` COPY block is a first-boot seed rather than the live source.
+
+#### nix-smoketest.bats: new suite (7 tests)
+
+Added `systems-ide/nix-smoketest.bats`, structurally identical to mercury-ide's: version match, store info, `pipe-operators` in `nix.conf` and in `nix eval`, `nix profile list` parity (`direnv`/`nil`/`bats`), `nil`/`direnv` on PATH, host-built `hello` visible in `/nix/store`.
+
+systems-ide's first run was 6/7 — `nix-env -q` failed because the host's profile generation (created via `nix profile install`) is in a manifest format `nix-env` can't read (see mercury-ide's BUILDLOG for the diagnosis). After swapping that test to `nix profile list` in both IDEs' suites, systems-ide re-ran 7/7. Josiah then committed the container, separately noting that a committed image starts roughly 0.5s faster than a fresh `--rm` run on a subsequent launch — plausibly overlay2 layer-initialization overhead on first start.
