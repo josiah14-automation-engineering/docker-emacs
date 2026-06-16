@@ -75,3 +75,28 @@ a flake-driven project workflow and belong at a single-level prefix rather than 
 under `SPC m f` (format) or another occupied slot.
 
 **Revisit if:** A dedicated Emacs nix-flake package emerges with its own binding conventions.
+
+---
+
+## Nix store bind mount: conditional detection, read-only/write split, MOUNT_HOST_NIX escape hatch
+
+**Date:** 2026-06-16
+**Status:** Active
+
+**Decision:** Bind-mount the host's `/nix` store only when it exists (`[[ -d /nix ]]`), using a RO/RW split that keeps store contents immutable while allowing Nix's mutable bookkeeping. Provide `MOUNT_HOST_NIX=0` to opt out without touching the host's filesystem.
+
+**Mount pattern:**
+
+| Path | Mode | Reason |
+|---|---|---|
+| `/nix` | `:ro` | Store contents immutable; prevents container writes to the host store |
+| `/nix/var/nix` | rw | Nix acquires `gc.lock` and writes `temproots` for any store operation; `:ro` here produces EBADF on lock acquisition |
+| `/nix/var/nix/profiles` | `:ro` | `nix develop` writes to `gcroots/auto`, never to `profiles`; writable profiles = container can tamper with host profile generations |
+| `~/.config/nix` | `:ro` | Config updates go through the host |
+| `~/.local/state/nix` | `:ro` | Profile updates go through the host |
+
+**Why conditional, not unconditional:** The `nix-source` COPY stage bakes a working `/nix` store into every image. When the host `/nix` is absent (or `MOUNT_HOST_NIX=0`), the container runs self-contained on that store — useful during host Nix outages, mid-upgrade states, or when evaluating a new IDE image before the host is wired up.
+
+**Why `MOUNT_HOST_NIX` in addition to `[[ -d /nix ]]`:** The directory guard is insufficient for a corrupt or mid-upgrade host store — `/nix` exists as a directory in both cases. The env var provides an explicit opt-out that doesn't require filesystem surgery on the host.
+
+**Revisit if:** A per-container Nix daemon eliminates the need for host-store sharing.

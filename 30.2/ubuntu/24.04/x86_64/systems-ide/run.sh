@@ -26,6 +26,17 @@ while getopts "f:" opt; do
     esac
 done
 
+nix_mounts=()
+if [[ -d /nix ]] && [[ "${MOUNT_HOST_NIX:-1}" == "1" ]]; then
+  nix_mounts+=(
+    -v /nix:/nix:ro
+    -v /nix/var/nix:/nix/var/nix
+    -v /nix/var/nix/profiles:/nix/var/nix/profiles:ro
+    -v "${HOME}/.config/nix:/home/${USER}/.config/nix:ro"
+    -v "${HOME}/.local/state/nix:/home/${USER}/.local/state/nix:ro"
+  )
+fi
+
 docker run --rm \
   --ipc host \
   --name "doom-systems-ide" \
@@ -33,9 +44,7 @@ docker run --rm \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro" \
   -v "${HOME}/Development/personal:/home/${USER}/Development/personal" \
-  -v /nix:/nix \
-  -v "${HOME}/.local/state/nix:/home/${USER}/.local/state/nix" \
-  -v "${HOME}/.config/nix:/home/${USER}/.config/nix" \
+  "${nix_mounts[@]+"${nix_mounts[@]}"}" \
   -w "/home/${USER}/Development/personal" \
   "${flight_mounts[@]+"${flight_mounts[@]}"}" \
   "josiah14/systems-doom-emacs-ide:30.2-${MARCH}-ubuntu-24.04" &

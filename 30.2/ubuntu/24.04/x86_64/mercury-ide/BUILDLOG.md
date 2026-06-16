@@ -590,3 +590,23 @@ With host and `nix-source` pinned to the same Nix version, `host/logic-languages
 Added `mercury-ide/nix-smoketest.bats`: `nix --version` matches the host (2.34.7); `nix store info` reports a trusted local store; the bind-mounted `nix.conf` has `pipe-operators` enabled; a `nix eval` using the pipe operator works; `nix profile list` reflects the host's shared profile (`direnv`, `nil`, `bats`); `nil`/`direnv` resolve on `~/.nix-profile/bin`; and a host-built `hello` package is visible in the bind-mounted `/nix/store`.
 
 The first run (on systems-ide, see its BUILDLOG) was 6/7 — `nix-env -q reflects the shared host profile` failed with `error: profile ".../profiles/profile" is incompatible with 'nix-env'; please use 'nix profile' instead`. Josiah ran the diagnostics (`nix-env -q`, `readlink ~/.nix-profile`, `ls .../profiles/`) that pinned it down: the host's current profile generation was created by `nix profile install` (the new JSON-manifest profile manager), and the old imperative `nix-env` can't read that manifest format — a hard format incompatibility, not a path or permissions issue (`nix-env` is effectively deprecated). Fixed by swapping the test to `nix profile list` with the same assertions, applied to both IDEs' suites before either was re-tested. mercury-ide passed 7/7 on its first run with the fixed test.
+
+---
+
+### 2026-06-16
+
+#### host/logic-languages-ide: conditional host Nix detection, RO mount split, MOUNT_HOST_NIX escape hatch
+
+`logic-languages-ide` previously mounted `/nix`, `~/.local/state/nix`, and `~/.config/nix` unconditionally and read-write. Three changes applied:
+
+**Conditional detection.** Mounts are now guarded by `[[ -d /nix ]]`. If the host has no Nix installation the three mounts are skipped, and the container runs on the `nix-source`-baked-in `/nix` store instead. The baked-in store is always present underneath; the host mounts shadow it when present and healthy.
+
+**Read-only split.** Upgraded from `/nix:/nix` (rw) to the faradai DECISIONLOG #99 pattern:
+- `/nix:/nix:ro` — store contents immutable; prevents the container from writing to the host store
+- `/nix/var/nix:/nix/var/nix` — rw override; Nix acquires `gc.lock` and writes `temproots` for any store-touching operation, including read-only `nix develop`; a plain `:ro` on all of `/nix` produces "Bad file descriptor" on lock acquisition
+- `/nix/var/nix/profiles:/nix/var/nix/profiles:ro` — re-pinned read-only; `nix develop` writes to `gcroots/auto`, never to `profiles`; a writable profiles dir would let the container tamper with the host's profile generations
+- `~/.config/nix:ro`, `~/.local/state/nix:ro` — all config and profile updates go through the host
+
+Rationale for RO: protects the host store from inconsistency if the container runs a different libc or kernel ABI. All store writes go through the host.
+
+**`MOUNT_HOST_NIX` escape hatch.** Full guard: `[[ -d /nix ]] && [[ "${MOUNT_HOST_NIX:-1}" == "1" ]]`. Josiah identified that `[[ -d /nix ]]` is true even when the host store is corrupt or mid-upgrade; setting `MOUNT_HOST_NIX=0` skips the host mounts entirely and falls back to the container's baked-in store, without needing to rename or remove `/nix` on the host.

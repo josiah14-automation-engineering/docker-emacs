@@ -130,9 +130,7 @@ project with a new or changed `.envrc`.
 
 ### Known limitations
 
-The container runs with `--rm`. `/nix`, `~/.local/state/nix`, and `~/.config/nix` are
-bind-mounted from the host (see "Shared Nix store" below), but the rest of `$HOME` is
-not, so:
+The container runs with `--rm`. When the host has Nix installed, `/nix`, `~/.local/state/nix`, and `~/.config/nix` are bind-mounted from the host (see "Shared Nix store" below), but the rest of `$HOME` is not, so:
 
 - **`direnv allow` doesn't persist across container restarts.** The allow-list lives
   under `$HOME/.local/share/direnv/`, which isn't bind-mounted, so expect to re-run
@@ -141,17 +139,24 @@ not, so:
 
 ### Shared Nix store
 
-mercury-ide (`host/logic-languages-ide`) and systems-ide (`run.sh`) bind-mount three
-paths from the host into the container:
+When the host has a `/nix` directory, mercury-ide (`host/logic-languages-ide`) and
+systems-ide (`run.sh`) automatically bind-mount five paths using a read/write split:
 
-- `/nix` — the Nix store itself
-- `~/.local/state/nix` — profile generations (`~/.nix-profile` resolves into here)
-- `~/.config/nix` — `nix.conf`
+| Path | Mode |
+|---|---|
+| `/nix` | read-only |
+| `/nix/var/nix` | read-write (Nix needs `gc.lock` and `temproots` for any store operation, including `nix develop`) |
+| `/nix/var/nix/profiles` | read-only (re-pinned; `nix develop` writes to `gcroots/auto`, never profiles) |
+| `~/.local/state/nix` | read-only |
+| `~/.config/nix` | read-only |
 
 The container's `/nix/store`, `nix.conf`, and `~/.nix-profile` are therefore the
 host's, live — not the copies the `nix-source` stage baked in at build time. Those
-baked-in copies still exist as a first-boot seed, but once the bind mounts are active
-they're shadowed.
+baked-in copies remain in the image as a fallback: if the host has no `/nix`, or you
+set `MOUNT_HOST_NIX=0`, the container runs entirely on its own internal store.
+
+The store is kept read-only to protect against inconsistency if the container runs a
+different libc or kernel ABI from the host. All store writes go through the host.
 
 Consequences:
 
@@ -171,6 +176,9 @@ Consequences:
   in `experimental-features`, and `nil`, `direnv`, `nix-direnv`, `bats` installed via
   `nix profile install` (not `nix-env` — `nix-env` can't read `nix profile install`'s
   manifest format).
+- **`MOUNT_HOST_NIX=0` skips all host nix mounts.** Use this if the host `/nix`
+  directory exists but the store is corrupt or mid-upgrade. The container falls back to
+  the baked-in `nix-source` store without needing to move or remove `/nix` on the host.
 
 Verify the shared store from inside either container with `bats nix-smoketest.bats`.
 
@@ -185,9 +193,11 @@ Verify the shared store from inside either container with `bats nix-smoketest.ba
 3. Copy/adapt `nix-keybindings.el` and load it from `config.el`.
 4. For projects with `git+ssh://` flake inputs, forward the SSH agent and `~/.ssh`
    in the `host/*` run script (see mercury-ide's `host/logic-languages-ide`).
-5. Bind-mount `/nix`, `~/.local/state/nix`, and `~/.config/nix` from the host in the
-   `host/*`/`run.sh` launcher (see "Shared Nix store" above), and copy/adapt
-   `nix-smoketest.bats` to verify the wiring.
+5. In the `host/*`/`run.sh` launcher, add the conditional nix mount block (see
+   mercury-ide's `host/logic-languages-ide` or systems-ide's `run.sh` for the pattern):
+   guard with `[[ -d /nix ]] && [[ "${MOUNT_HOST_NIX:-1}" == "1" ]]` and populate a
+   `nix_mounts` array with the five-path RO/RW split described in "Shared Nix store"
+   above. Copy/adapt `nix-smoketest.bats` to verify the wiring.
 
 ## Alternatives
 

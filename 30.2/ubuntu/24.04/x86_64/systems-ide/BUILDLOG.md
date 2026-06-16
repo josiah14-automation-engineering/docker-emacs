@@ -1197,3 +1197,17 @@ Added the same three bind mounts as mercury-ide's `host/logic-languages-ide`: `-
 Added `systems-ide/nix-smoketest.bats`, structurally identical to mercury-ide's: version match, store info, `pipe-operators` in `nix.conf` and in `nix eval`, `nix profile list` parity (`direnv`/`nil`/`bats`), `nil`/`direnv` on PATH, host-built `hello` visible in `/nix/store`.
 
 systems-ide's first run was 6/7 — `nix-env -q` failed because the host's profile generation (created via `nix profile install`) is in a manifest format `nix-env` can't read (see mercury-ide's BUILDLOG for the diagnosis). After swapping that test to `nix profile list` in both IDEs' suites, systems-ide re-ran 7/7. Josiah then committed the container, separately noting that a committed image starts roughly 0.5s faster than a fresh `--rm` run on a subsequent launch — plausibly overlay2 layer-initialization overhead on first start.
+
+---
+
+### 2026-06-16
+
+#### run.sh: conditional host Nix detection, RO mount split, MOUNT_HOST_NIX escape hatch
+
+Same hardening as mercury-ide's `host/logic-languages-ide` (see mercury-ide BUILDLOG, 2026-06-16). `run.sh` previously mounted `/nix`, `~/.local/state/nix`, and `~/.config/nix` unconditionally and read-write.
+
+- **Conditional detection:** mounts guarded by `[[ -d /nix ]]`; container falls back to the baked-in `nix-source` store when no host `/nix` exists.
+- **Read-only split:** `/nix:ro`, `/nix/var/nix` rw (lock/temproots), `/nix/var/nix/profiles:ro` (re-pinned), `~/.config/nix:ro`, `~/.local/state/nix:ro`.
+- **`MOUNT_HOST_NIX=0` escape hatch:** full guard is `[[ -d /nix ]] && [[ "${MOUNT_HOST_NIX:-1}" == "1" ]]`; opt out without touching the host's `/nix` directory when the store exists but is corrupt or mid-upgrade.
+
+Josiah verified the pattern in mercury-ide before applying it here.
