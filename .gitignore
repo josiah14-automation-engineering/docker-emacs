@@ -1,3 +1,4 @@
 *.swp
 host/
 .aider*
+.host-nix-bridge/
