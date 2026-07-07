@@ -4,7 +4,7 @@ set -euo pipefail
 TAG_CPU="${TAG_CPU:-m2}"
 USER="$(whoami)"
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-IMAGE="josiah14/mercury-doom-emacs-ide:30.2-${TAG_CPU}-ubuntu-26.04"
+IMAGE="josiah14/logic-doom-emacs-ide:30.2-${TAG_CPU}-ubuntu-26.04"
 
 if [[ "${1:-}" == "--test" || "${1:-}" == "-t" ]]; then
   docker run --rm \
@@ -85,7 +85,7 @@ fi
 
 exec docker run --rm \
   --ipc host \
-  --name "doom-mercury-ide-aarch64" \
+  --name "doom-logic-ide-aarch64" \
   -e WAYLAND_DISPLAY \
   -e XDG_RUNTIME_DIR \
   -e GDK_BACKEND=wayland \

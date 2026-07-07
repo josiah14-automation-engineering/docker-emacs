@@ -204,6 +204,25 @@ RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' 
 # libgnutls30 -> libgnutls30t64; libgtk-3-0 -> libgtk-3-0t64;
 # libtree-sitter0 -> libtree-sitter0.25; libxml2 -> libxml2-16;
 # libicu74 -> libicu78; libreadline8 -> libreadline8t64.
+#
+# swi-prolog-nox added for Prolog support (this image's new "logic" half
+# alongside Mercury): verified on ubuntu:26.04 arm64 (universe, 9.2.9+dfsg,
+# well above the sweeprolog.el package's documented >=8.5.18 requirement).
+# Pulls in swi-prolog-core-packages as a transitive dependency, which is what
+# actually matters here — it ships a *prebuilt* sweep-module.so plus
+# sweep_link.pl (confirmed present at
+# /usr/lib/swi-prolog/lib/aarch64-linux/sweep-module.so and
+# /usr/lib/swi-prolog/library/ext/sweep/sweep_link.pl after just installing
+# swi-prolog-nox, no core-packages listed explicitly). That means no cmake/
+# gcc/pkg-config needs to land in this final image at all: the sweeprolog
+# Elisp package's `sweeprolog--ensure-module' only searches Prolog's own
+# foreign-library search path for an existing module (see
+# packages-sweep/sweep_link.pl on GitHub) — it never compiles anything
+# itself. Building the module from source would additionally require
+# SWI-Prolog's full superbuild (packages-sweep's CMakeLists.txt includes
+# "../cmake/PrologPackage.cmake", which only exists inside the complete
+# swipl-devel checkout, not a standalone clone of the sweep package repo) —
+# moot here since the distro build already provides the binary.
 RUN apt-get update -y && \
     apt-get install -y \
       ca-certificates \
@@ -226,6 +245,7 @@ RUN apt-get update -y && \
       imagemagick \
       iputils-ping \
       aspell \
+      swi-prolog-nox \
       libacl1 \
       libasound2t64 \
       alsa-base \
@@ -336,7 +356,9 @@ COPY --chown=${USERNAME}:${USERNAME} config.el   /home/${USERNAME}/.config/doom/
 COPY --chown=${USERNAME}:${USERNAME} init.el     /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
 COPY --chown=${USERNAME}:${USERNAME} mercury.el      /home/${USERNAME}/.config/doom/mercury.el
-COPY --chown=${USERNAME}:${USERNAME} keybindings.el /home/${USERNAME}/.config/doom/keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} prolog.el      /home/${USERNAME}/.config/doom/prolog.el
+COPY --chown=${USERNAME}:${USERNAME} mercury-keybindings.el /home/${USERNAME}/.config/doom/mercury-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} prolog-keybindings.el /home/${USERNAME}/.config/doom/prolog-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} straight-versions.el \
      /home/${USERNAME}/.config/emacs/.local/straight/versions/default.el

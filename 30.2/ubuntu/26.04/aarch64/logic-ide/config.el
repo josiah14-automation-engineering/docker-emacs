@@ -22,6 +22,18 @@
 ;; (setq doom-font (font-spec :family "SourceCodePro Nerd Font" :size 16 :weight 'medium))
 ;;       doom-variable-pitch-font (font-spec :family "sans" :size 13))
 
+;; An earlier version of this line used "SRC-Hack Nerd Font Mono" -- a font
+;; family that exists on the *host* Emacs install this was measured against,
+;; but not in this container's own font set at all (`fc-list` here only has
+;; plain "Hack", not that compound Nerd Font name). An unresolvable
+;; `doom-font' derails Doom's startup far beyond just the font: the leader
+;; key stopped responding and the theme rendered as some unstyled default,
+;; both symptoms of `doom-init-fonts-h' erroring and aborting the rest of
+;; that startup hook. "Fira Code" is confirmed present here (`fonts-firacode`
+;; is already an explicit apt dependency below) -- verify any future font
+;; choice with `fc-list` inside the actual target image, not another host.
+(setq doom-font (font-spec :family "Fira Code" :size 14))
+
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
@@ -93,6 +105,8 @@
         (nerd-icons-codicon "nf-cod-lightbulb")))
 
 (load! "mercury")
-(load! "keybindings")
+(load! "mercury-keybindings")
+(load! "prolog")
+(load! "prolog-keybindings")
 (load! "nix-keybindings")
 

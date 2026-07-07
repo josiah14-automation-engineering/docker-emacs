@@ -8,7 +8,7 @@ EMAIL="${EMAIL:?Set EMAIL before building (e.g. EMAIL='you@example.com' ./build.
 
 docker build . \
   --ulimit nofile=262144:262144 \
-  -t "josiah14/mercury-doom-emacs-ide:30.2-${TAG_CPU}-ubuntu-26.04" \
+  -t "josiah14/logic-doom-emacs-ide:30.2-${TAG_CPU}-ubuntu-26.04" \
   --build-arg USERNAME="${USER}" \
   --build-arg USER_UID="$(id -u)" \
   --build-arg USER_GID="$(id -g)" \

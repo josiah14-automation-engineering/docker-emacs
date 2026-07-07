@@ -53,3 +53,18 @@
 (package! metal-mercury-mode
   :recipe (:host github :repo "ahungry/metal-mercury-mode"))
 
+;; sweeprolog is distributed via NonGNU ELPA, not MELPA, and its package
+;; name differs from its "sweep" project nickname -- both confirmed by
+;; cloning github.com/SWI-Prolog/packages-sweep directly (the actual repo;
+;; github.com/eshelyaron/sweep, an earlier guess, 404s). `:files' explicitly
+;; adds sweep.pl alongside straight's default *.el matching: the package's
+;; own `sweeprolog--ensure-module' loads "sweep.pl" from
+;; `sweeprolog--directory' (the straight checkout dir itself, per
+;; `(defvar sweeprolog--directory (file-name-directory load-file-name))'),
+;; and straight's default :files spec only picks up *.el/*.info/etc, so
+;; without this the package would fail at runtime with "Missing file
+;; `sweep.pl' in `sweeprolog' directory" despite installing cleanly.
+(package! sweeprolog
+  :recipe (:host github :repo "SWI-Prolog/packages-sweep"
+           :files (:defaults "sweep.pl")))
+
