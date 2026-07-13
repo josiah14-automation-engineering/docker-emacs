@@ -71,49 +71,48 @@
            (message "Playground URL: %s" url)))) ;; prints to bottom minibuffer
     (call-interactively #'+go/playground)))
 
-;; This needs to happen in an after! block because the default mapping in go-mode
-;; for SPC m h . is wired inside `+go-common-config` which is called from
-;; `use-package! go-mode :config`, which runs lazily when a .go file is first
-;; opened. This causes the go layer's default binding to overwrite any override
-;; on that keybinding we set, here.
-(after! go-mode
-  (map! :map go-mode-map
-        :localleader
-        (:prefix ("h" . "help")
-         :desc "Hover docs" "." #'lsp-describe-thing-at-point)))
-
+;; This whole block needs to happen in an after! block because go-mode's own
+;; default localleader bindings (e, I, h ., ...) are wired inside
+;; `+go-common-config`, called from `use-package! go-mode :config`, which
+;; runs lazily when a .go file is first opened. A plain map! call here loads
+;; before that lazy config fires, so anything it also binds by default gets
+;; silently overwritten right after this file loads.
+;;
 ;; Note: K is kept by convention — it is the default LSP hover key in Doom.
 ;; k (lowercase) is also bound here as an easier-to-type alias; go-mode's
 ;; localleader map leaves k unbound, though note that k retains its normal-mode
 ;; evil meaning (cursor up) outside the localleader context.
-(map! :map go-mode-map
-      :localleader
-      :desc "Playground (copy url)"  "e" #'+go/playground-yank
-      :desc "Add import"            "I" #'go-import-add
-      :desc "Hover docs"            "k" #'lsp-describe-thing-at-point
-      :desc "Hover docs"            "K" #'lsp-describe-thing-at-point
-      :desc "Lint package"          "l" (cmd! (compile "golangci-lint run ."))
-      :desc "Lint all"              "L" (cmd! (compile "golangci-lint run ./..."))
-      (:prefix ("p" . "profile")
-       :desc "Bench at point"       "s" #'+go/bench-single
-       :desc "Bench all"            "a" #'+go/bench-all)
-      ;; gorepl-mode is a third-party package whose autoload stubs don't carry
-      ;; the (interactive) declaration.  Doom generates correct stubs for its
-      ;; own module functions (hence #'+go/bench-single works), but for
-      ;; third-party packages the stub exists without interactive metadata, so
-      ;; commandp returns nil and map! rejects a bare #'symbol.  cmd! wraps
-      ;; each call in a (lambda () (interactive) ...) that satisfies commandp
-      ;; and triggers the real autoload on first invocation.
-      ;;
-      ;; gorepl-run additionally has no autoload cookie at all, so calling it
-      ;; cold raises void-function.  The (require 'gorepl-mode) before it loads
-      ;; the package explicitly; require is a no-op once the package is loaded.
-      (:prefix ("r" . "repl")
-       :desc "Run REPL"            "r" (cmd! (require 'gorepl-mode) (gorepl-run))
-       :desc "Run REPL, load file" "R" (cmd! (gorepl-run-load-current-file))
-       :desc "Eval line"           "e" (cmd! (gorepl-eval-line))
-       :desc "Eval line, advance"  "n" (cmd! (gorepl-eval-line-goto-next-line))
-       :desc "Eval region"         "E" (cmd! (call-interactively #'gorepl-eval-region))))
+(after! go-mode
+  (map! :map go-mode-map
+        :localleader
+        (:prefix ("h" . "help")
+         :desc "Hover docs" "." #'lsp-describe-thing-at-point)
+        :desc "Playground (copy url)"  "e" #'+go/playground-yank
+        :desc "Add import"            "I" #'go-import-add
+        :desc "Hover docs"            "k" #'lsp-describe-thing-at-point
+        :desc "Hover docs"            "K" #'lsp-describe-thing-at-point
+        :desc "Lint package"          "l" (cmd! (compile "golangci-lint run ."))
+        :desc "Lint all"              "L" (cmd! (compile "golangci-lint run ./..."))
+        (:prefix ("p" . "profile")
+         :desc "Bench at point"       "s" #'+go/bench-single
+         :desc "Bench all"            "a" #'+go/bench-all)
+        ;; gorepl-mode is a third-party package whose autoload stubs don't carry
+        ;; the (interactive) declaration.  Doom generates correct stubs for its
+        ;; own module functions (hence #'+go/bench-single works), but for
+        ;; third-party packages the stub exists without interactive metadata, so
+        ;; commandp returns nil and map! rejects a bare #'symbol.  cmd! wraps
+        ;; each call in a (lambda () (interactive) ...) that satisfies commandp
+        ;; and triggers the real autoload on first invocation.
+        ;;
+        ;; gorepl-run additionally has no autoload cookie at all, so calling it
+        ;; cold raises void-function.  The (require 'gorepl-mode) before it loads
+        ;; the package explicitly; require is a no-op once the package is loaded.
+        (:prefix ("r" . "repl")
+         :desc "Run REPL"            "r" (cmd! (require 'gorepl-mode) (gorepl-run))
+         :desc "Run REPL, load file" "R" (cmd! (gorepl-run-load-current-file))
+         :desc "Eval line"           "e" (cmd! (gorepl-eval-line))
+         :desc "Eval line, advance"  "n" (cmd! (gorepl-eval-line-goto-next-line))
+         :desc "Eval region"         "E" (cmd! (call-interactively #'gorepl-eval-region)))))
 
 ;; Local Variables:
 ;; no-byte-compile: t
