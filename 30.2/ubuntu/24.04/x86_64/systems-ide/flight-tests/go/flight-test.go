@@ -15,6 +15,9 @@ func main() {
 
 	// var _ int = "not an int"
 	// var _ string = 5
+	for i := range 10 { // uncomment this and change go in go.mod to 1.21 - if you get an error it's using the older go version
+		fmt.Println(i)
+	}
 
 }
 
