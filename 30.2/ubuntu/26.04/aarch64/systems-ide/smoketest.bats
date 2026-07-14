@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# IDE smoketest for systems-ide (Shell + Go + Nix).
+# IDE smoketest for systems-ide (Shell + Go + Nix + Bats).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -11,8 +11,8 @@
 # (Doom skips doom-font and module config entirely under `noninteractive').
 #
 # Run via: bats smoketest.bats
-# bash-language-server, shellcheck, zshdb, go, gopls, dlv, golangci-lint are
-# all baked into the image at build time (no network/host bind mounts
+# bash-language-server, shellcheck, zshdb, go, gopls, dlv, golangci-lint, bats
+# are all baked into the image at build time (no network/host bind mounts
 # required). The nix CLI itself is checked separately in nix-smoketest.bats,
 # since it depends on host bind mounts (see run.sh) not present here.
 
@@ -33,6 +33,14 @@ func main() {}
 EOF
   cat > /tmp/smoketest/test.nix <<'EOF'
 { }
+EOF
+  cat > /tmp/smoketest/test.bats <<'EOF'
+#!/usr/bin/env bats
+
+@test "addition works" {
+  result="$(( 2 + 2 ))"
+  [ "$result" -eq 4 ]
+}
 EOF
   emacs --daemon > /tmp/smoketest/daemon.log 2>&1 &
   for _ in $(seq 1 60); do
@@ -92,6 +100,12 @@ eval_elisp() {
   [[ "$output" =~ "2.11.4" ]]
 }
 
+@test "bats is installed and reports a version" {
+  run bats --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Bats" ]]
+}
+
 @test "opening a .bash file activates sh-mode with the bash dialect" {
   # sh-mode is the only major mode for shell scripts; bash vs zsh is tracked
   # by the buffer-local sh-shell variable, not a separate major mode (this is
@@ -137,6 +151,13 @@ eval_elisp() {
   [[ "$output" =~ "nix-mode" ]]
 }
 
+@test "opening a .bats file activates bats-mode with the bash dialect" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.bats") (format "%s %s" major-mode sh-shell))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "bats-mode" ]]
+  [[ "$output" =~ "bash" ]]
+}
+
 @test "global keybinding SPC b c resolves to flycheck-buffer" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.bash") (key-binding (kbd "SPC b c")))'
   [ "$status" -eq 0 ]
@@ -159,6 +180,12 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.nix") (list (key-binding (kbd "SPC m f")) (key-binding (kbd "SPC m p"))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(nix-format-buffer nix-update-fetch)" ]]
+}
+
+@test "bats localleader keybindings resolve (run test, run file, run all)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.bats") (list (key-binding (kbd "SPC m e e")) (key-binding (kbd "SPC m e b")) (key-binding (kbd "SPC m e a"))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(bats-run-current-test bats-run-current-file bats-run-all)" ]]
 }
 
 @test "Doom loaded without error (nonzero package/module count)" {

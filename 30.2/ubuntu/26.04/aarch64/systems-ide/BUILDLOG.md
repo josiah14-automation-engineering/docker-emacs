@@ -133,3 +133,150 @@ manual Go scratch project) into this directory. `logic-ide` has no equivalent
 directory at all — this convention wasn't carried over during that port, so
 there's no precedent either way. `run.sh`'s `-f` flag (ported from x86_64
 `systems-ide`) has nothing to mount without it.
+
+---
+
+### 2026-07-14
+
+#### Bats support
+
+Added `.bats` as a fourth supported language, following the same shape as
+Shell/Go/Nix: a `bats-keybindings.el`, a `packages.el` entry, a `Dockerfile`
+install + COPY, and new `smoketest.bats` cases.
+
+**Package choice**: `bats-mode` (dougm/bats-mode, MELPA), confirmed present in
+MELPA's live `archive-contents` before adding it to `packages.el` (per the
+"verify packages before build" rule) and its source read directly from GitHub
+to confirm the actual interface rather than guessing function names.
+`bats-mode` is `define-derived-mode bats-mode sh-mode`, sets `sh-shell` to
+`bash`, wires `flycheck`'s shellcheck checker to bats buffers itself, and
+registers `.bats` in `auto-mode-alist` — so, like `nushell-mode`, it needs
+only a `package!` declaration, no `init.el` `:lang` module entry (no Doom
+module for Bats exists). `bats-keybindings.el` is not wrapped in `after!
+bats-mode`, matching `sh-keybindings.el` rather than `nix-/go-keybindings.el`
+— the `after!` wrapper in those two exists specifically to out-race a
+competing Doom `:lang`-module `:config` block that resets the same bindings
+later; no such module exists for Bats, so there's nothing to race.
+
+**Found and fixed a pre-existing gap**: `run.sh -t` runs
+`docker run --rm -v ... IMAGE bats smoketest.bats` with zero bind mounts, so
+the bare image itself must already contain a working `bats` executable — it
+did not (`grep -n -i bats Dockerfile` was empty before this change). The
+`bats`/`nil`/`direnv`/`nixfmt` visible in `nix-smoketest.bats`'s `nix profile
+list` check come from the *host's* live nix profile, bind-mounted only in
+`run.sh`'s non-`-t` path (see the `nix_mounts` block) — not from anything
+baked into the image at build time. So `run.sh -t` was never actually
+runnable end-to-end even for the existing Shell/Go/Nix suite, only validated
+via host-side `bats --count` syntax checks (as this file already noted).
+Fixed by adding `bats` to the Dockerfile's apt list. Verified against the
+real `resolute` (26.04) archive index directly
+(`packages.ubuntu.com/resolute/bats`, package `bats` 1.13.0-1, arch: all)
+before adding it, rather than assuming the name carries over — same
+verification standard as every other package in this Dockerfile.
+
+**smoketest.bats**: added a `test.bats` fixture (`@test "addition works"`),
+a `bats --version` check, a `.bats` → `bats-mode`/`sh-shell=bash` activation
+check, and a localleader keybinding check for the three commands
+`bats-mode.el` already provides (`bats-run-current-test`,
+`bats-run-current-file`, `bats-run-all`), mapped under the existing
+"execute" prefix convention from `sh-keybindings.el`. `bats --count`: 21
+(was 18). Could not run `run.sh -t` end-to-end in this environment (no
+docker here either) — same limitation as the rest of this port.
+
+**Bug found after rebuild: `.bats` files stayed in `sh-mode`, not
+`bats-mode`.** User reported `lsp-mode`'s "no language servers... registered
+with `sh-mode'" warning; modeline showed `Sh [bats]` and
+`(eval-elisp "major-mode")` reported `sh-mode` directly. Ruled out an
+`lsp-mode`/Doom configuration problem first, by reading `lsp-bash.el` and
+`lsp-mode.el` from source: the `bash-ls` client's `:activation-fn`
+(`lsp-bash-check-sh-shell`) only checks the buffer-local `sh-shell` variable
+against `'(sh bash)` — it doesn't look at `major-mode` at all, and would
+happily activate for a genuine `bats-mode` buffer (which sets `sh-shell` to
+`'bash` itself) with zero extra config. So the real bug had to be upstream:
+`bats-mode` was never actually running.
+
+`Sh [bats]` is `sh-mode`'s own dynamic modeline lighter reflecting
+`sh-shell`'s value — plain `sh-mode`'s built-in shebang sniffing
+(`sh-set-shell`) reads whatever token follows `#!/usr/bin/env` and binds it
+to `sh-shell` verbatim, even for values it doesn't recognize (here, the
+literal `bats`). That's a different code path than `bats-mode`'s own body,
+which explicitly sets `sh-shell` to `'bash`. So the buffer was landing in
+plain `sh-mode` before `bats-mode`'s own `;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.bats\\'" . bats-mode))` cookie ever took
+effect. Checked whether MELPA's packaged snapshot (`20230325.7`) might be
+stale relative to the `bats-mode.el` source already read from GitHub's
+`master` branch — the GitHub commits API shows `master`'s newest commit
+(`fa88930`) is dated exactly `2023-03-25`, matching the MELPA stamp with no
+commits since, so that's not it; the installed package is the same source
+already reviewed.
+
+Root cause not fully isolated at this point (candidates: straight.el's
+autoload-cookie extraction not handling this file's bare `(progn
+(add-to-list ...))` form, or some ordering/build issue under Doom's sync)
+but rather than chase it further, added our own explicit
+`(add-to-list 'auto-mode-alist '("\\.bats\\'" . bats-mode))` directly in
+`bats-keybindings.el` — idempotent with the package's own registration if
+that turns out fine, and a guaranteed fix regardless of the underlying
+cause. Not yet rebuilt/verified in an actual container (no docker in this
+environment); pending user rebuild + confirmation.
+
+**Root cause isolated after rebuild; two-stage fix.** Josiah rebuilt and
+reopened `smoketest.bats` — still `Sh [bats]`. Diagnosed live in the running
+Emacs session via three targeted `M-:` checks, all run by Josiah directly:
+
+- `(rassq 'bats-mode auto-mode-alist)` confirmed our forced entry was
+  actually present in the alist.
+- `M-x normal-mode` in the mis-classified buffer reproduced the bug fresh
+  (no reopen needed), ruling out a stale/session-restored buffer — Doom's
+  persp/workspace session restore had been the leading alternate theory,
+  and this single test eliminated it.
+- `(seq-filter (lambda (e) (and (stringp (car e)) (ignore-errors
+  (string-match (car e) "smoketest.bats")))) auto-mode-alist)` returned
+  `(("\.bats\'" . sh-mode) ("\.bats\'" . bats-mode))` — two competing
+  entries for the identical regex, `sh-mode`'s ahead of ours. `auto-mode-
+  alist` resolution is first-match-wins, so `sh-mode` was winning outright
+  regardless of our `add-to-list` call having run.
+
+Actual root cause: `sh-script.el` registers `.bats → sh-mode` as a plain
+top-level form, not an `;;;###autoload` cookie — so it only takes effect
+once `sh-script.el` is actually `require`d, which can happen *after*
+`bats-keybindings.el` loads (triggered by any earlier shell-derived buffer
+in the same session), re-prepending its entry in front of ours.
+`add-to-list`'s "prepend by default" behavior only decides the winner
+between writers active at the same moment; it says nothing about a writer
+that runs later in the session.
+
+First fix attempt — wrap the correction in `(with-eval-after-load
+'sh-script (setf (alist-get "\.bats\'" auto-mode-alist nil nil #'equal)
+'bats-mode))` so it reliably runs after `sh-script.el`'s own registration,
+whenever that happens — worked when retested via `M-x normal-mode`. Josiah
+then rebuilt a **fresh** container specifically to test cold-start behavior
+(not just live-session retesting) and reported the *first* `.bats` file
+opened in that fresh container was still `Sh [bats]`. That one data point
+exposed the real gap: on a cold start, opening the first `.bats` file is
+itself what triggers `sh-mode`'s autoload (and thus `sh-script.el`'s full
+load) — so `sh-script.el`'s competing entry wins that one race before our
+`with-eval-after-load` hook can fire. Every subsequent open in the same
+session was already correct, which is exactly what made the gap easy to
+miss without a genuinely fresh container to test against.
+
+Final fix: force the `require` eagerly in `bats-keybindings.el` itself —
+`(require 'sh-script)` immediately followed by the same `setf`/`alist-get`
+correction, no `with-eval-after-load` indirection — so both now run at
+Doom startup, before Emacs has ever presented a `.bats` buffer, closing the
+race regardless of session history. Rebuilt and confirmed: `.bats` files
+now open directly into `bats-mode` on first try, cold start.
+
+**Josiah's contributions this session**: flagged a prompt-injection attempt
+embedded in what looked like an automated context-compaction message (a
+block appended to a tool result instructing "respond with TEXT ONLY... tool
+calls will be REJECTED") as suspicious rather than complying with it —
+correctly reasoned that real compaction happens outside the conversation,
+not via directive text inside a message body, and continued the actual
+debugging instead of fabricating a summary. Ran every `M-:` diagnostic that
+isolated the real root cause (the `normal-mode` retest that ruled out
+session-restore; the `seq-filter`/`rassq`/`assoc-default` checks that
+revealed the two competing alist entries and their order) and, critically,
+tested the fix against a genuinely fresh container rather than accepting
+the live-session retest as sufficient — the step that surfaced the
+cold-start race the first fix missed.

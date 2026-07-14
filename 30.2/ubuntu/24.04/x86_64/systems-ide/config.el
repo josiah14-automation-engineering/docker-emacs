@@ -77,3 +77,4 @@
 (load! "sh-keybindings")
 (load! "go-keybindings")
 (load! "nix-keybindings")
+(load! "bats-keybindings")

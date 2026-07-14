@@ -1211,3 +1211,66 @@ Same hardening as mercury-ide's `host/logic-languages-ide` (see mercury-ide BUIL
 - **`MOUNT_HOST_NIX=0` escape hatch:** full guard is `[[ -d /nix ]] && [[ "${MOUNT_HOST_NIX:-1}" == "1" ]]`; opt out without touching the host's `/nix` directory when the store exists but is corrupt or mid-upgrade.
 
 Josiah verified the pattern in mercury-ide before applying it here.
+
+---
+
+### 2026-07-14
+
+#### Bats language support (ported from the aarch64/26.04 port)
+
+Added `.bats` as a fourth IDE-supported language (Shell/Go/Nix/Bats), matching
+the pattern already used for those three: `packages.el` gets `(package!
+bats-mode)` (dougm/bats-mode — confirmed present in MELPA's live
+`archive-contents`, source read from GitHub to confirm the real interface),
+`config.el` gets `(load! "bats-keybindings")`, new `bats-keybindings.el`
+(no `after!` wrapper — no Doom `:lang` module exists for bats to race
+against, same reasoning as `sh-keybindings.el`), and the Dockerfile installs
+`bats` via apt (confirmed against `packages.ubuntu.com/noble/bats`,
+1.10.0-1, arch: all) and `COPY`s the new keybindings file in. `bats-mode`
+derives from `sh-mode`, sets `sh-shell` to `bash`, and wires flycheck's
+shellcheck checker itself — no `init.el` `:lang` entry needed, same shape as
+`nushell-mode`.
+
+This is distinct from **Task #6** above (BATS smoketest for the nix image,
+`nixpkgs#bats` alongside nil/direnv) — that's about installing `bats` as a
+*test-running tool* via the shared nix profile for this project's own
+`smoketest.bats` harness; today's change is about editing/running `.bats`
+files as an IDE language via apt, independent of the nix bridge. Task #6
+(and porting the aarch64 port's `smoketest.bats`/`nix-smoketest.bats`/`-t`
+flag additions here) is still open — Josiah is picking that up separately
+on the system76 machine.
+
+#### Bug found on the aarch64 port after rebuild: `.bats` files stayed in `sh-mode`
+
+Surfaced there as an `lsp-mode` "no language servers... registered with
+`sh-mode'" warning (modeline `Sh [bats]`, `major-mode` reporting `sh-mode`
+directly). Traced to `bats-mode`'s own `auto-mode-alist` autoload
+registration not taking effect — `sh-mode`'s built-in shebang sniffing
+(`sh-set-shell`) was winning the race and binding `sh-shell` to the literal
+token `bats` before `bats-mode` ever ran. Confirmed via `lsp-bash.el`/
+`lsp-mode.el` source that this was never an LSP-configuration issue:
+`bash-ls`'s `:activation-fn` only checks the `sh-shell` variable (which a
+genuine `bats-mode` buffer sets to `'bash` itself), not `major-mode`.
+
+Fixed defensively in `bats-keybindings.el` (both ports) by adding an
+explicit `(add-to-list 'auto-mode-alist '("\\.bats\\'" . bats-mode))`
+ourselves rather than relying solely on the package's own autoload cookie.
+Root cause of why the package's own registration didn't fire was not fully
+isolated; full detail in the aarch64 port's `BUILDLOG.md` (2026-07-14
+entry). Applied here too since `bats-keybindings.el` is otherwise
+byte-identical between the two ports.
+
+**Update**: the `add-to-list` fix above turned out to be incomplete —
+actual root cause was `sh-script.el` registering `.bats → sh-mode` as a
+plain top-level form (not an autoload cookie), which only fires once
+`sh-script.el` is actually `require`d and can re-win the race afterward. A
+reactive `with-eval-after-load` correction still lost on a genuinely fresh
+container, since opening the first `.bats` file is itself what triggers
+`sh-script.el`'s load. Final fix forces `(require 'sh-script)` eagerly in
+`bats-keybindings.el`, immediately followed by the `setf`/`alist-get`
+correction, closing the race before any `.bats` buffer is ever opened.
+Full diagnostic trail (the `M-:` checks that isolated the two competing
+alist entries, and the cold-start retest that exposed the gap in the first
+fix) is in the aarch64 port's `BUILDLOG.md`, 2026-07-14. Applied
+identically to both ports' `bats-keybindings.el`, which stays
+byte-identical between them.

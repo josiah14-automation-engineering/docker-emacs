@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+
 # Nix integration smoketest for the systems-ide container.
 #
 # Verifies the host /nix, ~/.local/state/nix, and ~/.config/nix bind mounts
