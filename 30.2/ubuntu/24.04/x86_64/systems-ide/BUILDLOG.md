@@ -1274,3 +1274,23 @@ alist entries, and the cold-start retest that exposed the gap in the first
 fix) is in the aarch64 port's `BUILDLOG.md`, 2026-07-14. Applied
 identically to both ports' `bats-keybindings.el`, which stays
 byte-identical between them.
+
+**Update**: even with `.bats` correctly landing in `bats-mode`, `bash-ls`
+still never attached — `(lsp!)` silently no-oped. Two independent bugs in
+the `with-eval-after-load 'lsp-mode` registration block: (1) `cl-pushnew`
+on `lsp--client-major-modes` byte-compiles into a call to a literal
+`(setf lsp--client-major-modes)` function that's never defined, since that
+accessor's `setf` support is a runtime-registered `gv-expander`, not
+available at Doom's compile time — fixed via `cl-struct-slot-value`
+instead, whose `setf`-expander lives in `cl-lib` and is always available;
+(2) `bash-ls` itself is registered by the separate `clients/lsp-bash.el`,
+which only auto-loads once some buffer's major-mode already matches one of
+its modes — never true for `bats-mode` on its own — so the `gethash`
+lookup came back `nil`. Fixed by forcing `(require 'lsp-bash)` inside the
+hook before the lookup. A long red herring (suspected stale/corrupted
+native-compiled `lsp-mode`) preceded both finds and is documented in full,
+along with the exact fixes and a `DOOMDIR`-vs-live-mount testing gotcha
+discovered along the way, in the aarch64 port's `BUILDLOG.md`, 2026-07-14
+("LSP integration: bash-ls never attached to bats-mode buffers"). Applied
+identically here since `bats-keybindings.el` stays byte-identical between
+the two ports.

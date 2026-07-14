@@ -16,6 +16,35 @@
 (require 'sh-script)
 (setf (alist-get "\\.bats\\'" auto-mode-alist nil nil #'equal) 'bats-mode)
 
+;; bash-language-server's lsp-mode client checks major-mode against a literal
+;; list rather than derived-mode-p, so bats-mode (derived from sh-mode) never
+;; matches and lsp! silently no-ops. Register it onto the existing client
+;; instead of defining a redundant one, and map it to the "shellscript"
+;; language id so the server receives the same protocol id it expects from
+;; sh-mode buffers.
+;;
+;; `lsp--client-major-modes' is only setf-able via a gv-expander that
+;; lsp-mode's `cl-defstruct' registers at runtime when lsp-mode.el loads --
+;; not at compile time. Since Doom byte-compiles this file without lsp-mode
+;; loaded, `cl-pushnew' on that accessor macroexpands into a call to a
+;; literal `(setf lsp--client-major-modes)' function that never gets
+;; defined, erroring "void-function" the first time this hook runs.
+;; `cl-struct-slot-value' sidesteps that: its setf-expander lives in cl-lib
+;; itself, so it's always available regardless of load order.
+;;
+;; `bash-ls' itself isn't registered by loading core `lsp-mode' -- it lives
+;; in the separate `clients/lsp-bash.el', which `lsp-mode' only auto-loads
+;; once some buffer's major-mode already matches one of its registered
+;; modes. A bats-mode buffer never matches (that's the whole problem this
+;; file exists to fix), so lsp-bash would never load on its own here.
+;; Force it explicitly so `gethash' below actually finds the client.
+(with-eval-after-load 'lsp-mode
+  (require 'lsp-bash)
+  (cl-pushnew 'bats-mode (cl-struct-slot-value
+                          'lsp--client 'major-modes
+                          (gethash 'bash-ls lsp-clients)))
+  (add-to-list 'lsp-language-id-configuration '(bats-mode . "shellscript")))
+
 (map! :map bats-mode-map
       :localleader
       (:prefix ("e" . "execute")

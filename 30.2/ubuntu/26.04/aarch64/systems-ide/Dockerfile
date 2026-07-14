@@ -237,6 +237,13 @@ RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/confi
     && git config --global url."http://git.savannah.gnu.org/git/".insteadOf "https://git.savannah.gnu.org/git/" \
     && ulimit -n 262144 \
     && /home/${USERNAME}/.config/emacs/bin/doom env \
+    `# force a clean recompile here -- the first sync (before init.el/packages.el` \
+    `# were copied in) may have already built some of these packages against a` \
+    `# different module/package set. Reusing that build/ output risks compiled` \
+    `# .elc files silently going stale relative to a package's straight-checked-out` \
+    `# .el source (e.g. lsp-mode's lsp-execute-command ending up defined more` \
+    `# times in the .elc than in the .el, which trips up cl-generic at load time).` \
+    && rm -rf /home/${USERNAME}/.config/emacs/.local/straight/build-* \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
 CMD ["emacs"]

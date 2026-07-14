@@ -280,3 +280,118 @@ revealed the two competing alist entries and their order) and, critically,
 tested the fix against a genuinely fresh container rather than accepting
 the live-session retest as sufficient — the step that surfaced the
 cold-start race the first fix missed.
+
+---
+
+#### LSP integration: bash-ls never attached to bats-mode buffers
+
+With `.bats` files correctly landing in `bats-mode`, the next problem
+surfaced: `(lsp!)` in `smoketest.bats` neither errored nor prompted to
+import the project — it just silently did nothing. `bats-keybindings.el`
+already special-cased this (`bash-language-server`'s `bash-ls` client
+checks `major-mode` against a literal list rather than `derived-mode-p`, so
+`bats-mode`, despite deriving from `sh-mode`, never matches), registering
+itself onto the existing `bash-ls` client via `(cl-pushnew 'bats-mode
+(lsp--client-major-modes (gethash 'bash-ls lsp-clients)))` inside
+`(with-eval-after-load 'lsp-mode ...)`. That registration turned out to be
+broken in two independent ways, plus one red herring that ate most of the
+session before either real bug was found.
+
+**Red herring: suspected stale/corrupted native-compiled `lsp-mode`.**
+`(lsp!)` was erroring with `"lsp-execute-command is already defined as
+something else than a generic function"`, thrown from
+`cl-generic-ensure-function` while `lsp-mode.elc` defined its own *first*
+`cl-defmethod lsp-execute-command`. Chased this for a long stretch: traced
+every `defalias` call for that symbol via an advice on `defalias` (three
+hits, all from `lsp-mode.elc`, none autoloads — eventually recognized as
+the *normal* cl-generic pattern of one dispatcher creation plus one
+redefinition per `cl-defmethod`, not evidence of corruption); confirmed via
+`how-many` that the checked-out `lsp-mode.el` source has exactly the 2
+legitimate `cl-defmethod` definitions upstream has; compared `.elc`/`.eln`
+mtimes against the source and found both freshly compiled, ruling out
+straight/native-comp staleness. A targeted `:before` advice on
+`cl-generic-ensure-function` did confirm something genuinely odd — at the
+moment of the error, `lsp-execute-command` was bound to a plain
+byte-compiled function whose body was just the method's docstring, not a
+`cl--generic` struct — but since this error stopped recurring once the
+real bugs below were fixed, it was set aside as an unresolved native-comp
+oddity rather than chased further. Worth revisiting if it resurfaces.
+
+**Real bug #1: `cl-pushnew` on a struct accessor byte-compiles into a
+call to a function that's never defined.** `lsp--client-major-modes`'s
+`setf` support is a `gv-expander` that lsp-mode's `cl-defstruct` registers
+*at runtime*, once `lsp-mode.el` actually loads — not at compile time. Doom
+byte-compiles `bats-keybindings.el` without `lsp-mode` loaded, so
+`cl-pushnew`'s macroexpansion falls back to assuming a literal
+`(setf lsp--client-major-modes)` function will exist at runtime. It never
+does, so the very first time the `with-eval-after-load` hook ran, it threw
+`(void-function (setf lsp--client-major-modes))`. Confirmed by disassembling
+the failing form in a full backtrace and matching it to the exact
+`cl-pushnew` call site. Fixed by swapping to `cl-struct-slot-value`, whose
+`setf`-expander lives in `cl-lib` itself and is therefore always available
+regardless of load order:
+
+```elisp
+(cl-pushnew 'bats-mode (cl-struct-slot-value
+                        'lsp--client 'major-modes
+                        (gethash 'bash-ls lsp-clients)))
+```
+
+**Real bug #2: `bash-ls` isn't registered by loading core `lsp-mode`.**
+After fixing bug #1, the same hook failed differently:
+`(wrong-type-argument lsp--client nil)` — `(gethash 'bash-ls lsp-clients)`
+was returning `nil`. `bash-ls` is actually registered inside the separate
+`clients/lsp-bash.el`, which `lsp-mode` only auto-loads once some buffer's
+major-mode already matches one of its registered modes. A `bats-mode`
+buffer never matches on its own — that's the entire bug this file exists
+to fix — so `lsp-bash` never got a chance to load, and the client hash
+table lookup came back empty. Fixed by forcing the require explicitly,
+inside the same hook, before the lookup:
+
+```elisp
+(with-eval-after-load 'lsp-mode
+  (require 'lsp-bash)
+  (cl-pushnew 'bats-mode (cl-struct-slot-value
+                          'lsp--client 'major-modes
+                          (gethash 'bash-ls lsp-clients)))
+  (add-to-list 'lsp-language-id-configuration '(bats-mode . "shellscript")))
+```
+
+**Testing complication: container `DOOMDIR` is a build-time snapshot, not
+the live-mounted project.** Confirmed via `/proc/<pid>/environ` on the
+container's `emacs` process that `DOOMDIR=/home/josiah/.config/doom`
+*inside* the container — a copy baked in at image-build time by the
+Dockerfile's `COPY` steps, distinct from `automation-engineering/docker-
+emacs`, which *is* bind-mounted live into the container. Editing the
+project's `bats-keybindings.el` on the host had no effect on the running
+container until the fixed file was pushed in directly (`docker cp` into
+the container's `DOOMDIR`), followed by `doom sync` and a Doom restart.
+Anyone iterating against an already-running container needs to repeat that
+`docker cp` + `doom sync` cycle per edit; only a real image rebuild picks
+up source changes automatically. The earlier `rm -rf .../straight/build-*`
+recompile-forcing step (added to both Dockerfiles the same day, before
+either real bug above was found) stays in place as reasonable insurance
+around the two-stage-sync design, even though it turned out not to be the
+fix for this particular bug.
+
+**Confirmed working**: `(lsp!)` in `smoketest.bats` now triggers the
+"import project?" prompt; after accepting, `(bound-and-true-p lsp-mode)`,
+`(featurep 'lsp-mode)`, and `(lsp-workspaces)` all confirm a live, attached
+workspace. Not yet done: the same verification against the `24.04/x86_64`
+container, and a real `docker build` of both images (the fixes are
+currently only live-patched into the running containers, plus committed to
+the project source).
+
+**Josiah's contributions this session**: pulled every diagnostic backtrace
+requested, including the pivotal one that first showed the `cl-pushnew`
+expansion disassembled down to the exact `(setf lsp--client-major-modes)`
+call site (turning a guess about compile-order into a confirmed root
+cause), and the later one showing the `cl-struct-slot-offset`-based
+expansion hitting `wrong-type-argument` on a `nil` client (which is what
+redirected the investigation from "is the fix compiling correctly" to "is
+`bash-ls` even registered yet"). Also reported, mid-session, that the
+sandbox had been switched off FaradAI due to local network limits — which
+turned out to be exactly what unblocked direct `docker exec`/`docker cp`
+access to the running container, without which the `DOOMDIR`-mismatch
+finding (and the ability to patch the fix in and retest live, without a
+full rebuild) wouldn't have been possible.
