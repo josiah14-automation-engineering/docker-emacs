@@ -38,12 +38,21 @@
 ;; modes. A bats-mode buffer never matches (that's the whole problem this
 ;; file exists to fix), so lsp-bash would never load on its own here.
 ;; Force it explicitly so `gethash' below actually finds the client.
-(with-eval-after-load 'lsp-mode
+(after! lsp-mode
   (require 'lsp-bash)
   (cl-pushnew 'bats-mode (cl-struct-slot-value
                           'lsp--client 'major-modes
                           (gethash 'bash-ls lsp-clients)))
   (add-to-list 'lsp-language-id-configuration '(bats-mode . "shellscript")))
+
+;; Doom's own `:lang sh +lsp' module hooks `lsp!' onto `sh-mode-local-vars-
+;; hook' (its standard defer-until-after-directory-locals convention), which
+;; only fires for buffers whose `major-mode' is literally `sh-mode' -- not
+;; for bats-mode, even though it derives from sh-mode. With no Doom :lang
+;; module for bats to wire this up, nothing ever calls `lsp!' automatically
+;; on a fresh `.bats' buffer; it only worked when called by hand. Mirror
+;; Doom's own hook exactly, scoped to bats-mode's own local-vars hook.
+(add-hook 'bats-mode-local-vars-hook #'lsp! 'append)
 
 (map! :map bats-mode-map
       :localleader

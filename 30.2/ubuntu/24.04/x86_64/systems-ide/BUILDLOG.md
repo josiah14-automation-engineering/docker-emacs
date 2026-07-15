@@ -1294,3 +1294,19 @@ discovered along the way, in the aarch64 port's `BUILDLOG.md`, 2026-07-14
 ("LSP integration: bash-ls never attached to bats-mode buffers"). Applied
 identically here since `bats-keybindings.el` stays byte-identical between
 the two ports.
+
+**Update**: even after both fixes, a genuine cold start (fresh IDE, open
+`smoketest.bats` first thing, no manual `(lsp!)`) still didn't attach —
+narrowed to a missing invocation, not a registration problem, since manual
+`(lsp!)` still worked. Doom's `:lang sh +lsp` module hooks `lsp!` onto
+`sh-mode-local-vars-hook`, which only fires for literal `sh-mode` buffers,
+not `bats-mode` (despite deriving from it) — with no Doom `:lang` module
+for bats, nothing called `lsp!` automatically. Fixed with
+`(add-hook 'bats-mode-local-vars-hook #'lsp! 'append)`, mirroring Doom's
+own hook. Also swapped `with-eval-after-load 'lsp-mode` to Doom's `after!`
+(matching this project's other keybinding files and the style guide) and
+reworded the `rm -rf .../straight/build-*` Dockerfile comment, which had
+stated the ruled-out stale-bytecode theory as fact. Full detail in the
+aarch64 port's `BUILDLOG.md`, 2026-07-14 ("LSP integration, part 2:
+cold-start still didn't attach"). Confirmed working on a genuine cold
+start on aarch64; x86_64 rebuild and retest pending.

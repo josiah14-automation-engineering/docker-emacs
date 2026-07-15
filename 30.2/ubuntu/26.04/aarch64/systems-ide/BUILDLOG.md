@@ -395,3 +395,45 @@ turned out to be exactly what unblocked direct `docker exec`/`docker cp`
 access to the running container, without which the `DOOMDIR`-mismatch
 finding (and the ability to patch the fix in and retest live, without a
 full rebuild) wouldn't have been possible.
+
+---
+
+#### LSP integration, part 2: cold-start still didn't attach
+
+Both real bugs above fixed and confirmed via manual `(lsp!)` calls, but a
+genuine cold start — starting the IDE and opening `smoketest.bats` first
+thing, no manual `M-:` — still didn't trigger the "import project?" prompt.
+Manually running `(lsp!)` from the elisp evaluator still worked fine, which
+narrowed it immediately: registration was correct, but nothing was actually
+*calling* `lsp!` for a fresh `bats-mode` buffer.
+
+Root cause: Doom's own `:lang sh +lsp` module hooks `lsp!` onto
+`sh-mode-local-vars-hook` (confirmed by reading
+`modules/lang/sh/config.el` inside the container) — Doom's standard
+defer-until-after-directory-locals convention. That hook only fires for
+buffers whose `major-mode` is literally `sh-mode`; `bats-mode` deriving
+from `sh-mode` doesn't inherit it. With no Doom `:lang` module for bats to
+wire this up on its own, nothing ever called `lsp!` automatically. Fixed
+by mirroring Doom's own hook exactly, scoped to bats-mode's own local-vars
+hook: `(add-hook 'bats-mode-local-vars-hook #'lsp! 'append)`.
+
+Bundled two small cleanups into the same pass while already in this file:
+switched the client-registration block from raw `with-eval-after-load
+'lsp-mode` to Doom's `after!` macro, matching `config.el`/`nix-
+keybindings.el`/`go-keybindings.el` and `ELISP-STYLE-GUIDE.md` §11.2's
+stated preference (this predated today's changes; not a new bug, just an
+inconsistency worth fixing while already touching this exact block twice
+in one session); and reworded the `rm -rf .../straight/build-*` Dockerfile
+comment, which had asserted the stale-bytecode theory as settled fact even
+though the "LSP integration" entry above documents it as a ruled-out red
+herring — now describes the step as precautionary insurance instead of
+claiming a specific (wrong) mechanism.
+
+**Confirmed working, genuine cold start**: rebuilt the aarch64 image,
+started the IDE fresh, opened `smoketest.bats` first thing — LSP attached
+automatically, no manual `(lsp!)` needed, modeline confirms it's live.
+Opening `build.sh` afterward correctly did *not* re-trigger the import
+prompt (same project root already has a workspace — expected, not a
+regression). Retested Go support afterward too, confirming the shared
+`Dockerfile`/`lsp-clients` changes didn't disturb it. x86_64 verification
+and rebuild still pending (Josiah pulling latest to test there next).

@@ -241,8 +241,9 @@ RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/confi
     `# were copied in) may have already built some of these packages against a` \
     `# different module/package set. Reusing that build/ output risks compiled` \
     `# .elc files silently going stale relative to a package's straight-checked-out` \
-    `# .el source (e.g. lsp-mode's lsp-execute-command ending up defined more` \
-    `# times in the .elc than in the .el, which trips up cl-generic at load time).` \
+    `# .el source. Precautionary insurance around the two-stage-sync design below,` \
+    `# not a fix for any specific bug we've confirmed -- see BUILDLOG.md 2026-07-14` \
+    `# for a bytecode-staleness theory chased and ruled out this same session.` \
     && rm -rf /home/${USERNAME}/.config/emacs/.local/straight/build-* \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
