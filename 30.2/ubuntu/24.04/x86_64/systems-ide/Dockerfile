@@ -31,6 +31,8 @@ ARG POWERLINE_FONTS_COMMIT=a029626780dd4af32f15a3e708a5b00528c22f1d
 ARG NERD_ICONS_COMMIT=1db0b0b9203cf293b38ac278273efcfc3581a05f
 ARG NFM_SHA256=f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60
 ARG ZSHDB_VERSION=1.1.4
+ARG NU_VERSION=0.114.1
+ARG NU_SHA256=8802b26edcdf1a64477567b5ce909fbae3d72d731c8f0847892ea16c6fa73c53
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -79,6 +81,12 @@ RUN apt-get update -y && \
       vim \
       `# --- native elisp compilation ---` \
       libgccjit-13-dev \
+      `# --- tree-sitter grammar compilation (nushell-ts-mode) ---` \
+      `# libgccjit-dev above only provides the JIT library Emacs links against` \
+      `# for native-comp -- it doesn't put a cc/gcc executable on PATH. Tree-` \
+      `# sitter grammars are compiled independently at build time via a real` \
+      `# compiler invocation, not linked against libgccjit at all.` \
+      gcc \
       `# --- emacs runtime: audio ---` \
       alsa-base \
       libasound2t64 \
@@ -146,6 +154,17 @@ RUN git clone --depth 1 --branch "${ZSHDB_VERSION}" https://github.com/rocky/zsh
 
 RUN npm install -g bash-language-server@5.6.0
 
+# nushell ships its own LSP server behind `nu --lsp` (nu-lsp), so this is the
+# only install step nushell support needs -- no separate language-server
+# package. Prebuilt release tarball rather than cargo: no Rust toolchain is
+# otherwise present in this image. Just the `nu` binary is kept; the bundled
+# nu_plugin_* binaries, LICENSE, and README aren't needed here.
+RUN curl -fsSL "https://github.com/nushell/nushell/releases/download/${NU_VERSION}/nu-${NU_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/nu.tar.gz \
+    && echo "${NU_SHA256}  /tmp/nu.tar.gz" | sha256sum -c - \
+    && tar -C /tmp -xzf /tmp/nu.tar.gz \
+    && install -m 755 "/tmp/nu-${NU_VERSION}-x86_64-unknown-linux-gnu/nu" /usr/local/bin/nu \
+    && rm -rf /tmp/nu.tar.gz "/tmp/nu-${NU_VERSION}-x86_64-unknown-linux-gnu"
+
 RUN userdel ubuntu || true \
     && groupadd -g ${USER_GID} ${USERNAME} \
     && mkdir -p /home/${USERNAME}/.config/emacs \
@@ -198,12 +217,28 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
     && /home/${USERNAME}/.config/emacs/bin/doom install -! --aot \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
+# nushell-ts-mode (packages.el) needs the 'nu tree-sitter grammar compiled and
+# on disk before Doom ever loads it -- its own file only registers .nu files
+# in auto-mode-alist inside a (when (treesit-ready-p 'nu) ...) form, so this
+# has to happen at build time, not deferred to a lazy runtime fetch (no
+# network required at container start, matching this image's other tooling).
+# -Q skips loading any init file; this is pure vanilla Emacs treesit, nothing
+# Doom-specific. gcc/git are already installed above -- tree-sitter-nu is
+# plain C (parser.c/scanner.c), no C++ compiler needed. Explicit OUT-DIR:
+# Doom redirects its own grammar search path to ~/.config/emacs/.local/cache/
+# tree-sitter (not vanilla Emacs's ~/.config/emacs/tree-sitter default), so
+# the grammar has to land there directly or Doom's own Emacs won't find it,
+# confirmed live via Doom's own "language grammar ... unavailable" warning.
+RUN emacs --batch -Q --eval "(progn \
+      (setq treesit-language-source-alist '((nu \"https://github.com/nushell/tree-sitter-nu\" nil \"src\"))) \
+      (treesit-install-language-grammar 'nu \"/home/${USERNAME}/.config/emacs/.local/cache/tree-sitter\"))"
+
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 
 COPY --chown=${USERNAME}:${USERNAME} config.el          /home/${USERNAME}/.config/doom/config.el
 COPY --chown=${USERNAME}:${USERNAME} init.el            /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el        /home/${USERNAME}/.config/doom/packages.el
-COPY --chown=${USERNAME}:${USERNAME} shell.el               /home/${USERNAME}/.config/doom/shell.el
+COPY --chown=${USERNAME}:${USERNAME} shell-config.el        /home/${USERNAME}/.config/doom/shell-config.el
 COPY --chown=${USERNAME}:${USERNAME} sh-keybindings.el     /home/${USERNAME}/.config/doom/sh-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} c-keybindings.el      /home/${USERNAME}/.config/doom/c-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} rust-keybindings.el   /home/${USERNAME}/.config/doom/rust-keybindings.el
@@ -212,9 +247,12 @@ COPY --chown=${USERNAME}:${USERNAME} cmake-keybindings.el  /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} lua-keybindings.el    /home/${USERNAME}/.config/doom/lua-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el    /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.config/doom/bats-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} bats-config.el        /home/${USERNAME}/.config/doom/bats-config.el
 COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.config/doom/guile-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
+COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} nu-config.el          /home/${USERNAME}/.config/doom/nu-config.el
 COPY --chown=${USERNAME}:${USERNAME} global-keybindings.el /home/${USERNAME}/.config/doom/global-keybindings.el
 
 RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \

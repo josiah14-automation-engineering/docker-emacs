@@ -437,3 +437,199 @@ prompt (same project root already has a workspace — expected, not a
 regression). Retested Go support afterward too, confirming the shared
 `Dockerfile`/`lsp-clients` changes didn't disturb it. x86_64 verification
 and rebuild still pending (Josiah pulling latest to test there next).
+
+---
+
+#### Nushell support added as a fifth language
+
+Following the same shape as Bats: `nushell-mode` (syntax highlighting only)
+was already declared in `packages.el`, and `nu-keybindings.el` already
+existed but was dead code — never `load!`-ed from `config.el`, no real
+keybindings in it, and not even in the Dockerfile's `COPY` list. Nushell
+itself (the `nu` binary) wasn't installed anywhere either.
+
+Much less custom wiring was needed than Bats required, though. Checked
+`lsp-mode`'s own `clients/lsp-nushell.el` first: it registers a client
+(`nushell-ls`, `:new-connection (lsp-stdio-connection '("nu" "--lsp"))`,
+`:activation-fn (lsp-activate-on "nushell")`) and `lsp-mode`'s *default*
+`lsp-language-id-configuration` already maps `nushell-mode`/`nushell-ts-
+mode` → `"nushell"` — so, unlike `bash-ls`, no manual client-registration
+hack (`cl-struct-slot-value`, mutating an existing client's major-modes
+list) was needed at all; the client just needs to actually load.
+
+Two gaps remained, both familiar from the Bats work:
+
+1. `clients/lsp-nushell.el` is a separate file `lsp-mode` only auto-loads
+   once some buffer's major-mode already matches an already-loaded
+   client's activation function — nothing pulls it in for a fresh
+   `nushell-mode` buffer on its own. Fixed with `(after! lsp-mode (require
+   'lsp-nushell))`, same fix shape as `lsp-bash` needed.
+2. `nushell-mode` derives from plain `prog-mode`, not from anything Doom's
+   `:lang` modules already wire `lsp!` onto via `<mode>-local-vars-hook`.
+   With no Doom `:lang` module for nushell, nothing called `lsp!`
+   automatically. Fixed with `(add-hook 'nushell-mode-local-vars-hook
+   #'lsp! 'append)`, mirroring Doom's own convention directly (same fix
+   shape Bats needed for its own cold-start gap).
+
+**Install**: nushell ships its own LSP server behind `nu --lsp` — no
+separate language-server package to install, just the `nu` binary itself.
+Verified the actual current release (`gh release view 0.114.1 --repo
+nushell/nushell`) rather than guessing a version, per this project's own
+"verify packages before build" rule — pulled the real asset filenames and
+`SHA256SUMS` from the release directly. Installed via a prebuilt Linux
+release tarball (`nu-0.114.1-aarch64-unknown-linux-gnu.tar.gz`, verified
+against its published sha256), the same curl+sha256sum+tar shape already
+used for Go, rather than `cargo install` — this image has no Rust
+toolchain otherwise, so pulling one in just for one binary would've been a
+much heavier lift for no real benefit. The tarball extracts to a versioned
+subdirectory containing `nu` plus several `nu_plugin_*` binaries, `LICENSE`,
+and `README.txt`; only `nu` itself is copied out into `/usr/local/bin`.
+
+**Keybindings researched against nu-lsp's actual source, not assumed**:
+fetched `crates/nu-lsp/src/lib.rs` directly and confirmed which
+`ServerCapabilities` are actually set. `rename_provider`,
+`references_provider`, `document_symbol_provider`/`workspace_symbol_
+provider`, and `signature_help_provider` are all genuinely supported —
+meaning Doom's existing global LSP bindings (`SPC c r`, `g D`, inline
+signature help) just work for nushell with zero extra configuration.
+`document_formatting_provider` and `code_action_provider` are explicitly
+*not* implemented, so `SPC c a` and any format-buffer binding were
+deliberately left out of `nu-keybindings.el`'s reference comment — they'd
+silently no-op against this server. The one genuinely new addition:
+`nu-run-region`/`nu-run-buffer` (`SPC m e e` / `SPC m e b`), mirroring
+`sh-keybindings.el`'s region/buffer execute pair, using `nu -c` for the
+region variant since nushell has no comparable REPL-eval package of its
+own the way Go has `gorepl-mode`.
+
+**Convention fixes made along the way, not nu-specific**:
+
+- `bats-keybindings.el` mixed plumbing (the `auto-mode-alist` fix, the
+  `lsp-bash` require/registration, the local-vars-hook) together with its
+  actual `map!` keybindings, unlike `go-config.el`/`go-keybindings.el`'s
+  established split. Split it the same way: all the plumbing moved into a
+  new `bats-config.el`, leaving `bats-keybindings.el` with just the `map!`
+  block. `nu-config.el`/`nu-keybindings.el` follow this same split from
+  the start.
+- `shell.el` renamed to `shell-config.el` for the same naming consistency
+  (it already held only config/plumbing, zero keybindings — the split
+  was already correct, just the name didn't match the `<lang>-config.el`
+  convention). Its `provide` was already `'systems-ide-shell` rather than
+  `'shell` specifically to avoid colliding with Emacs's own built-in
+  `shell.el` (the `M-x shell` package) — silently breaking
+  `shell-mode-hook` elsewhere, per that history already documented
+  earlier in this log. Renamed the `provide` to `'shell-config` instead:
+  matches the rest of the codebase's filename-matches-feature-name
+  convention while *still* avoiding the original collision, since nothing
+  else would ever plausibly `(require 'shell-config)`.
+
+Both ports updated in lockstep (`nu-config.el`/`nu-keybindings.el`/
+`bats-config.el`/`shell-config.el` are byte-identical between them, same
+as the rest of this project's per-language files). x86_64 didn't have a
+general `smoketest.bats` at all before this (only `nix-smoketest.bats`) —
+confirmed all pinned tool versions actually match between the two
+Dockerfiles (Go, zshdb, bash-language-server, gopls, dlv, golangci-lint)
+before porting the whole suite over rather than just the new nu cases, so
+x86_64 now has parity with aarch64's full language smoketest for the first
+time.
+
+**Confirmed working, aarch64**: Josiah rebuilt the image and ran
+`bats smoketest.bats` (via `run.sh -t`) — all 25 tests passed, including
+all four new nushell cases (install version check, mode activation,
+lsp-mode load, localleader keybindings). x86_64 rebuild/retest still
+pending on the System76 machine.
+
+---
+
+#### Nushell follow-up: switched to nushell-ts-mode for working indentation
+
+Plain `nushell-mode` (the package from the entry above) turned out to have
+no working indentation at all. Confirmed by reading its source directly
+rather than guessing: it defines `nushell-enable-auto-indent` (default
+`nil`) with a docstring describing an indent-on-keyword feature, but the
+`nushell-auto-indent-trigger-keywords` variable that feature depends on is
+never defined anywhere in the 150-line file — the feature was never
+finished. No indent-line-function is set at all, so Emacs just falls back
+to copy-previous-line's-indentation, with nothing structural happening on
+newline-into-a-block or on `evil`'s `O`.
+
+`nushell-ts-mode` (tree-sitter based, already present on this host from
+an earlier check) has a complete `treesit-simple-indent-rules` table
+(blocks, arrays, records, parens, string bodies) plus `electric-indent-
+chars` for brackets, `completion-at-point` (operators/keywords/types/
+nearby variables via a tree-sitter query), and `imenu` integration — all
+things plain `nushell-mode` never had. Switching is a strict functionality
+upgrade, not a tradeoff, with one new consideration: it depends on the
+`tree-sitter-nu` grammar being compiled from C source at build time (a
+real new moving part `nushell-mode` never needed, being pure Elisp).
+
+**Changes**: `packages.el` swapped `nushell-mode` → `nushell-ts-mode`.
+`nu-config.el` gained an eager `(require 'nushell-ts-mode)` — its own file
+registers `.nu` in `auto-mode-alist`/`interpreter-mode-alist` inside a
+top-level `(when (treesit-ready-p 'nu) ...)` form rather than behind an
+autoload cookie, so nothing associates `.nu` files with it until the whole
+file is required at least once; same fix shape `bats-config.el` needed for
+`sh-script`'s race. Renamed the `local-vars-hook` target and `nu-
+keybindings.el`'s `map!` target from `nushell-mode` to `nushell-ts-mode`.
+`lsp-mode`'s default `lsp-language-id-configuration` already maps
+`nushell-ts-mode` → `"nushell"` out of the box (confirmed earlier session,
+same as plain `nushell-mode`), so no LSP-side changes were needed beyond
+the rename.
+
+**Grammar install, and two build-time gotchas found only by testing live
+rather than trusting the plan**: added a `Dockerfile` step compiling
+`tree-sitter-nu` via `emacs --batch -Q --eval` + `treesit-install-
+language-grammar`, reasoning from the package's own `nu-lsp` precedent
+that this had to happen at build time (no network at container start).
+First rebuild's smoketest run still showed `.nu` failing to activate
+`nushell-ts-mode` — rather than guess again, started a throwaway debug
+container (`docker run -d ... sleep 3600`) to test the grammar-install
+step live and iterate fast without a full rebuild cycle each time:
+
+1. Running the exact install command live surfaced the real error:
+   `(file-missing ... cc)` — no C compiler on `PATH` at all.
+   `libgccjit-15-dev` (already installed, for native-comp) only provides
+   the JIT *library* Emacs links against; it doesn't put a `cc`/`gcc`
+   *executable* anywhere. Confirmed `tree-sitter-nu`'s `src/` is plain C
+   (`parser.c`/`scanner.c`, no `.cc`) via `gh api`, so plain `gcc` (no g++)
+   was enough — added it to the Dockerfile's apt list.
+2. After installing `gcc` live and recompiling, the grammar built and
+   `ls` confirmed the `.so` on disk — but `treesit-install-language-
+   grammar` immediately warned it couldn't find what it had just written,
+   searching `~/.config/emacs/tree-sitter/` (vanilla Emacs's default)
+   while Josiah's own copy-pasted live warning (from his actual running
+   Doom session) showed the real search path as `~/.config/emacs/.local/
+   cache/tree-sitter/` — a Doom-specific redirect. Checked directly with
+   `emacs --batch --eval` (no `-Q`) whether `treesit-extra-load-path` held
+   the answer — it was `nil` even without `-Q`, and `--batch` mode doesn't
+   replicate Doom's real interactive startup at all (same
+   `noninteractive` gap already documented for `doom-font`/module config
+   earlier in this log). Had to test against a genuine `emacs --daemon` +
+   `emacsclient --eval` instead — matching exactly how `smoketest.bats`
+   itself verifies things — to see the *real* resolved path, confirming
+   Doom redirects its cache dir rather than setting that specific
+   variable. Passed the correct `OUT-DIR` explicitly to `treesit-install-
+   language-grammar` to match. Re-verified `treesit-ready-p`, mode
+   activation, `lsp-mode` load, and both localleader keybindings, all
+   live in the daemon, before touching the Dockerfile again — a first
+   `emacsclient --eval` call after switching modes hung the whole debug
+   daemon (likely an "import project?" prompt blocking on a headless
+   session with nothing to answer it, the same class of issue the
+   original bash-ls integration hit); killed and restarted the daemon
+   with `lsp-auto-guess-root` set first to sidestep it rather than debug
+   that prompt itself, since it wasn't the thing under test.
+
+Both fixes (`gcc` in the apt list, explicit grammar `OUT-DIR`) applied to
+both ports' Dockerfiles. Rebuilt aarch64 and reran the full smoketest
+suite: all 25 pass, including `nushell-ts-mode` activation and its
+keybindings. Josiah separately confirmed indentation itself works
+correctly by hand-testing in the toy script. x86_64 rebuild/retest still
+pending.
+
+**Josiah's contributions this session**: flagged that auto-indent was
+"annoying enough in daily work" to justify switching packages rather than
+living with the gap, and pointed out mid-session (twice) that "real"/
+"genuine" had become a meaningless filler qualifier in these write-ups —
+gaps and bugs are all real if they're worth mentioning at all. Also
+copy-pasted the exact live warning text from his own running Doom session
+when asked, which is what actually revealed the correct cache-dir path
+rather than that detail being guessed or re-derived from documentation.

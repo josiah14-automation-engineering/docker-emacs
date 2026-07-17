@@ -1310,3 +1310,57 @@ stated the ruled-out stale-bytecode theory as fact. Full detail in the
 aarch64 port's `BUILDLOG.md`, 2026-07-14 ("LSP integration, part 2:
 cold-start still didn't attach"). Confirmed working on a genuine cold
 start on aarch64; x86_64 rebuild and retest pending.
+
+---
+
+### 2026-07-16 — Nushell actually wired up, then switched to nushell-ts-mode
+
+`nushell-mode`/`nu-keybindings.el` had existed since the 2026-05-28
+research entry above but were dead: never `load!`-ed, no real bindings,
+`nu` itself not installed. Wired up properly this session: `nu` binary
+installed via a verified-current release tarball (`gh release view`, not
+guessed), `nu-config.el` added (`after! lsp-mode (require 'lsp-nushell)`
++ `(add-hook 'nushell-mode-local-vars-hook #'lsp! 'append)`, same fix
+shapes bats needed), `nu-keybindings.el` given real bindings (execute
+region/buffer via `nu -c`/`nu FILE`). `lsp-mode`'s own `lsp-nushell.el`
+client and default `lsp-language-id-configuration` already covered
+`nushell-mode` — no manual client-registration hack like bats needed.
+
+Same session, reworked file conventions across *all* language files, not
+just nu's: split `bats-keybindings.el`'s plumbing into a new `bats-
+config.el` (matching `go-config.el`/`go-keybindings.el`'s existing split),
+renamed `shell.el` → `shell-config.el` (and its `provide` from
+`'systems-ide-shell` to `'shell-config`, still avoiding the original
+collision with Emacs's built-in `shell.el` documented earlier in this
+log, just less ad-hoc about it), added proper `;;; file.el --- Summary`
+headers / `Commentary:` / `Code:` / `ends here` footers to every language
+file (previously only `go-keybindings.el` had the full convention), and
+added a `LOCAL-LEADER` cheat-sheet to each file's own `Commentary:`
+section listing its actual custom bindings (previously only the generic
+Doom-default reference bindings were documented, the least interesting
+part). x86_64's `smoketest.bats` didn't exist at all before this (only
+`nix-smoketest.bats`) — confirmed all pinned tool versions match aarch64's
+Dockerfile first, then ported the *whole* suite over, not just nu's cases.
+
+**Then**: plain `nushell-mode` turned out to have no working indentation
+(a `nushell-enable-auto-indent` flag defaulting off, referencing a
+trigger-keywords variable never actually defined in the package). Switched
+to `nushell-ts-mode` (tree-sitter based, genuinely implements indent
+rules, completion-at-point, and imenu) — a strict upgrade, with one new
+consideration: it depends on the `tree-sitter-nu` grammar being compiled
+from C source at build time, a real new moving part plain `nushell-mode`
+never needed. First rebuild's smoketest still failed to activate
+`nushell-ts-mode`; rather than guess again, a throwaway debug container
+(`docker run -d ... sleep 3600`) found two things a live daemon session
+could show that a plan couldn't: no `cc` on `PATH` at all (`libgccjit-dev`
+only provides the native-comp *library*, not a compiler binary — added
+plain `gcc`), and Doom redirects its tree-sitter grammar search path to
+`~/.config/emacs/.local/cache/tree-sitter` rather than vanilla Emacs's
+default, confirmed by testing against a real `emacs --daemon` (`--batch`
+alone doesn't replicate Doom's actual interactive startup, same gap
+already noted for `doom-font`/module config). Full account, including the
+hung-daemon detour from an unanswerable "import project?" prompt, is in
+the aarch64 port's `BUILDLOG.md`, same date ("Nushell follow-up: switched
+to nushell-ts-mode for working indentation"). Both fixes applied to both
+ports' Dockerfiles; confirmed working (all 25 smoketests, including
+`nushell-ts-mode` activation) on aarch64. x86_64 rebuild/retest pending.

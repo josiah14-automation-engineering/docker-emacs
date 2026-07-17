@@ -1,4 +1,6 @@
-;;; nix-keybindings.el -*- lexical-binding: t; -*-
+;;; nix-keybindings.el --- Nix mode keybindings -*- lexical-binding: t; -*-
+
+;;; Commentary:
 
 ;; Doom nix module default SPC m bindings (unchanged):
 ;;
@@ -12,6 +14,16 @@
 ;;   h   help group (hover docs, describe symbol)
 ;;   a   code actions
 ;;   r   rename (LSP rename; shadows nix module's nix-repl-show — see SPC m l r)
+;;
+;; This file's overrides and additions (SPC m ...):
+;;   f       format buffer            (nix-format-buffer) — swapped from module default
+;;   p       update fetch hash        (nix-update-fetch)  — swapped from module default
+;;   l c     flake check              (nix flake check)
+;;   l u     flake update             (nix flake update)
+;;   l d     flake develop            (nix develop, async)
+;;   l r     nix REPL                 (nix-repl-show)
+
+;;; Code:
 
 ;; Overrides: f and p are swapped back to the cross-IDE convention (f = format).
 ;; The nix module binds them the other way around. Must be wrapped in
@@ -31,3 +43,4 @@
          "r" #'nix-repl-show)))
 
 (provide 'nix-keybindings)
+;;; nix-keybindings.el ends here

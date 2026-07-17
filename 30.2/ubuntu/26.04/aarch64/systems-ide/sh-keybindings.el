@@ -1,4 +1,6 @@
-;;; sh-keybindings.el -*- lexical-binding: t; -*-
+;;; sh-keybindings.el --- Shell mode keybindings -*- lexical-binding: t; -*-
+
+;;; Commentary:
 
 ;; Default Doom/LSP bindings active in shell buffers (reference):
 ;;   g d         go to definition        (lsp / xref)
@@ -7,6 +9,15 @@
 ;;   ] d / [ d   next / prev diagnostic  (flycheck)
 ;;   SPC c a     code actions            (lsp)
 ;;   SPC b c     flycheck buffer         (config.el global)
+;;
+;; LOCAL-LEADER — this file's own bindings (SPC m ...):
+;;   e e   execute region              (sh-execute-region)
+;;   e b   execute buffer              (sh-execute-region over the whole buffer)
+;;   r r   rename symbol               (lsp-rename)
+;;   d d   start debugger              (realgud:zshdb)
+;;   s s   switch shell dialect        (sh-set-shell)
+
+;;; Code:
 
 (map! :map sh-mode-map
       :localleader
@@ -22,3 +33,4 @@
        :desc "Switch shell dialect" "s" #'sh-set-shell))
 
 (provide 'sh-keybindings)
+;;; sh-keybindings.el ends here

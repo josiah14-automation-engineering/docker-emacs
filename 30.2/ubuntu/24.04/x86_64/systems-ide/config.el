@@ -72,9 +72,12 @@
 ;; load language configs and keybindings
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (load! "go-config")
-(load! "shell")
+(load! "shell-config")
+(load! "bats-config")
+(load! "nu-config")
 (load! "global-keybindings")
 (load! "sh-keybindings")
 (load! "go-keybindings")
 (load! "nix-keybindings")
 (load! "bats-keybindings")
+(load! "nu-keybindings")

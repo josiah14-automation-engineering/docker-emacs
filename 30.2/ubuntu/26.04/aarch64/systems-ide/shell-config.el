@@ -1,4 +1,6 @@
-;;; shell.el -*- lexical-binding: t; -*-
+;;; shell-config.el --- Shell (Bash/Zsh/Ksh) mode configuration -*- lexical-binding: t; -*-
+
+;;; Code:
 
 (setq lsp-bash-shellcheck-arguments "-x")
 
@@ -34,5 +36,5 @@
                             "\\.kshrc\\'")))
   (register-shell-file-patterns (cdr config) (car config)))
 
-(provide 'systems-ide-shell)
-
+(provide 'shell-config)
+;;; shell-config.el ends here
