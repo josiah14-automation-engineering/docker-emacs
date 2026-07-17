@@ -19,6 +19,7 @@
        (evil +everywhere)
        file-templates
        fold
+       (format +onsave)
        snippets
 
        :emacs
@@ -36,7 +37,7 @@
        syntax
 
        :tools
-       (debugger +lsp)
+       debugger
        direnv
        docker
        editorconfig
@@ -47,6 +48,7 @@
        make
 
        :lang
+       (cc +lsp)
        data
        emacs-lisp
        (go +lsp)

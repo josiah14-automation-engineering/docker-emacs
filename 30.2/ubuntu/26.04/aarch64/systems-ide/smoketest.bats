@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# IDE smoketest for systems-ide (Shell + Go + Nix + Bats + Nushell).
+# IDE smoketest for systems-ide (Shell + Go + Nix + Bats + Nushell + C/C++/CMake).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -12,9 +12,12 @@
 #
 # Run via: bats smoketest.bats
 # bash-language-server, shellcheck, zshdb, go, gopls, dlv, golangci-lint, bats,
-# nu are all baked into the image at build time (no network/host bind mounts
-# required). nu doubles as its own LSP server (`nu --lsp'), no separate
-# language-server package needed. The nix CLI itself is checked separately in
+# nu, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan are
+# all baked into the image at build time (no network/host bind mounts
+# required). nu and clangd both double as their own LSP server, no separate
+# language-server package needed for either. ccls is deliberately not
+# installed (see Dockerfile) -- Doom's own :lang cc module already
+# deprioritizes it below clangd. The nix CLI itself is checked separately in
 # nix-smoketest.bats, since it depends on host bind mounts (see run.sh) not
 # present here.
 
@@ -40,6 +43,22 @@ EOF
 def main [] {
   echo "hi"
 }
+EOF
+  cat > /tmp/smoketest/test.c <<'EOF'
+int main(void) { return 0; }
+EOF
+  cat > /tmp/smoketest/test.cpp <<'EOF'
+int main() { return 0; }
+EOF
+  cat > /tmp/smoketest/test.h <<'EOF'
+#pragma once
+EOF
+  cat > /tmp/smoketest/test.mm <<'EOF'
+int main() { return 0; }
+EOF
+  cat > /tmp/smoketest/CMakeLists.txt <<'EOF'
+cmake_minimum_required(VERSION 3.10)
+project(smoketest)
 EOF
   cat > /tmp/smoketest/test.bats <<'EOF'
 #!/usr/bin/env bats
@@ -119,6 +138,51 @@ eval_elisp() {
   [[ "$output" =~ "0.114.1" ]]
 }
 
+@test "clang and clangd are installed" {
+  run clang --version
+  [ "$status" -eq 0 ]
+  run clangd --version
+  [ "$status" -eq 0 ]
+}
+
+@test "gcc and g++ are installed" {
+  run gcc --version
+  [ "$status" -eq 0 ]
+  run g++ --version
+  [ "$status" -eq 0 ]
+}
+
+@test "cmake and gdb are installed" {
+  run cmake --version
+  [ "$status" -eq 0 ]
+  run gdb --version
+  [ "$status" -eq 0 ]
+}
+
+@test "gdb version satisfies dape's built-in DAP requirement (>= 14.1)" {
+  run bash -c "gdb --version | head -1 | grep -oE '[0-9]+' | head -1"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 14 ]
+}
+
+@test "cmake-language-server is installed and reports the pinned version (0.1.11)" {
+  run cmake-language-server --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.1.11" ]]
+}
+
+@test "vcpkg is installed and reports the pinned version (2026.06.24)" {
+  run vcpkg version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "2026.06.24" ]]
+}
+
+@test "conan is installed and reports the pinned version (2.30.0)" {
+  run conan --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "2.30.0" ]]
+}
+
 @test "opening a .bash file activates sh-mode with the bash dialect" {
   # sh-mode is the only major mode for shell scripts; bash vs zsh is tracked
   # by the buffer-local sh-shell variable, not a separate major mode (this is
@@ -183,6 +247,61 @@ eval_elisp() {
   [[ "$output" =~ "t" ]]
 }
 
+@test "opening a .c file activates c-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "c-mode" ]]
+}
+
+@test "opening a .cpp file activates c++-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.cpp") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "c++-mode" ]]
+}
+
+@test "opening a .h file activates c-mode (Doom's default header fallback)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.h") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "c-mode" ]]
+}
+
+@test "opening a .mm file activates objc-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.mm") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "objc-mode" ]]
+}
+
+@test "opening CMakeLists.txt activates cmake-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/CMakeLists.txt") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "cmake-mode" ]]
+}
+
+@test "lsp-mode loads when a c-mode buffer is opened ((cc +lsp))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (featurep (quote lsp-mode)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
+@test "lsp-mode loads when a cmake-mode buffer is opened ((cc +lsp))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/CMakeLists.txt") (featurep (quote lsp-mode)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
+@test "dape's built-in gdb debug config covers c-mode/c++-mode (:tools debugger)" {
+  run eval_elisp '(progn (require (quote dape)) (let ((modes (plist-get (alist-get (quote gdb) dape-configs) (quote modes)))) (list (memq (quote c-mode) modes) (memq (quote c++-mode) modes))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "c-mode" ]]
+  [[ "$output" =~ "c++-mode" ]]
+}
+
+@test "global debugger keybinding SPC d d resolves to dape (config/default +bindings)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC d d")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "dape" ]]
+}
+
 @test "global keybinding SPC b c resolves to flycheck-buffer" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.bash") (key-binding (kbd "SPC b c")))'
   [ "$status" -eq 0 ]
@@ -217,6 +336,18 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.nu") (list (key-binding (kbd "SPC m e e")) (key-binding (kbd "SPC m e b"))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(nu-run-region nu-run-buffer)" ]]
+}
+
+@test "c localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "lsp-format-buffer" ]]
+}
+
+@test "cmake localleader keybindings resolve (configure, build, rebuild, clean)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/CMakeLists.txt") (list (key-binding (kbd "SPC m b c")) (key-binding (kbd "SPC m b b")) (key-binding (kbd "SPC m b r")) (key-binding (kbd "SPC m b d"))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(+cmake/configure +cmake/build +cmake/rebuild +cmake/clean)" ]]
 }
 
 @test "Doom loaded without error (nonzero package/module count)" {

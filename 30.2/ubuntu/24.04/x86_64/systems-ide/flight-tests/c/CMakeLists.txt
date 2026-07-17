@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10)
+project(ctest C)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_compile_options(-Wall -Wextra)
+add_executable(ctest src/main.c src/greet.c)

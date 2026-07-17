@@ -2,3 +2,5 @@
 host/
 .aider*
 .host-nix-bridge/
+**/flight-tests/*/build/
+**/flight-tests/*/.cache/

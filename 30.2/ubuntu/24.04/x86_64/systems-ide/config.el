@@ -66,7 +66,14 @@
 
 (after! lsp-mode
   (setq lsp-modeline-code-action-fallback-icon
-        (nerd-icons-codicon "nf-cod-lightbulb")))
+        (nerd-icons-codicon "nf-cod-lightbulb"))
+  ;; Without this, opening a file lsp-mode hasn't seen before (e.g. a lone
+  ;; .h opened before its .c sibling) blocks on a synchronous "import
+  ;; project?" prompt in the minibuffer. Because Emacs is single-threaded,
+  ;; that prompt also wedges every other emacsclient connection until it's
+  ;; answered -- fatal for the daemon-driven smoketest flow. Auto-accepting
+  ;; the guessed root avoids the prompt entirely.
+  (setq lsp-auto-guess-root t))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; load language configs and keybindings
@@ -81,3 +88,5 @@
 (load! "nix-keybindings")
 (load! "bats-keybindings")
 (load! "nu-keybindings")
+(load! "c-keybindings")
+(load! "cmake-keybindings")

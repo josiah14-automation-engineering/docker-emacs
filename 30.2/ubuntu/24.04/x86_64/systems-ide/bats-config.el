@@ -1,5 +1,13 @@
 ;;; bats-config.el --- Bats mode configuration -*- lexical-binding: t; -*-
 
+;;; Commentary:
+
+;; Non-keybinding setup for bats-mode: forces .bats files to resolve to
+;; bats-mode instead of losing a load-order race to sh-script.el's own
+;; sh-mode registration, and registers bats-mode onto lsp-mode's existing
+;; bash-ls client (bash-language-server) so LSP support works in .bats
+;; buffers. See bats-keybindings.el for this mode's actual keybindings.
+
 ;;; Code:
 
 ;; sh-script.el also claims .bats -> sh-mode, as a plain top-level form (not

@@ -633,3 +633,211 @@ gaps and bugs are all real if they're worth mentioning at all. Also
 copy-pasted the exact live warning text from his own running Doom session
 when asked, which is what actually revealed the correct cache-dir path
 rather than that detail being guessed or re-derived from documentation.
+
+---
+
+### 2026-07-17 — C/C++/CMake added as a sixth language; package managers wired in
+
+`c-keybindings.el` and `cmake-keybindings.el` existed only as the empty
+placeholder files scaffolded at project start (see the 2026-05-06 x86_64
+entries) — never `load!`-ed, no toolchain installed. Wired both up per the
+project's original "Language stack decisions" spec (`C/C++`: full IDE
+support, `clangd`, both `gcc`/`g++` and `clang`, `gdb`; `CMake`: full
+support, `cmake-language-server`).
+
+**`init.el`**: added `(cc +lsp)` to `:lang` and `(format +onsave)` to
+`:editor` (the latter was previously absent entirely — no language in this
+image had a formatter wired until now). `config.el` gained two `load!`
+calls (`c-keybindings`, `cmake-keybindings`).
+
+**Dockerfile additions**:
+- `clang`, `clangd`, `clang-format`, `gdb`, `cmake`, `ninja-build`, `g++`
+  (`gcc` was already present, pulled in earlier for tree-sitter grammar
+  compilation). `ccls` deliberately excluded — no apt package, no prebuilt
+  release binary, and building it from source against a matching `libclang`
+  would be real fragility for a server Doom's own `:lang cc` module already
+  deprioritizes below clangd.
+- `cmake-language-server` 0.1.11 via `pipx`. Its own repo has been
+  unmaintained since Jan 2025 and declares `requires-python <3.14`, which
+  this Ubuntu release's system Python (3.14.4) fails outright — confirmed
+  live in a throwaway container, not assumed. `--ignore-requires-python`
+  installs it anyway, but its loose `pygls>=1.1.1` constraint then resolves
+  pygls 2.x, which removed `LanguageServer` from `pygls.server` as a
+  breaking change (confirmed live via the resulting `ImportError`, not just
+  an overcautious version cap). `pipx inject cmake-language-server
+  pygls==1.3.1 --force` pins back to the last 1.x release; `--version`
+  confirmed working with this combination before committing to it.
+- `vcpkg` (2026.06.24) and `conan` (2.30.0) added as the C/C++ package
+  managers — no equivalent existed for this language pair before. `vcpkg`
+  has no apt package or standalone release binary for the tool itself (it's
+  meant to live as a clone alongside your projects); cloned to a stable path
+  and bootstrapped instead, falling back to source compile if no prebuilt
+  `vcpkg-tool` release matches the arch (needs `cmake`/`ninja-build`/`g++`,
+  already installed). `conan` installed cleanly via `pipx` with no
+  workarounds needed. `zip` added to the apt list as a `vcpkg` bootstrap
+  prerequisite.
+- `nupm` (nushell's own package manager, pinned to commit `9a28419`) added
+  in the same pass — bundled here because it's the same "give every
+  language that has a package manager one" motivation as vcpkg/Conan, not
+  because it's C-specific. It has no apt/pip/tagged-release path at all: a
+  self-hosted Nushell module you clone and `use`, explicitly marked
+  "experimentation stage" by its own maintainers. Confirmed live in a
+  throwaway container that the pinned commit bootstraps and installs
+  packages correctly before committing to it. Found and fixed one install-path
+  gotcha live: `nupm install <path> --path` needs `<path>` to be the
+  directory directly containing `nupm.nuon`, not a bare relative name — the
+  project's own README self-install example only works by coincidence when
+  the checkout happens to be cloned into a directory literally named
+  `nupm`. Only `nupm` itself is baked in; specific packages it installs
+  (`nutest`, etc.) belong to whichever project needs them.
+
+**Two bugs found and fixed, both via live testing rather than assumed
+correct from the config alone:**
+
+1. Opening a lone `.h` file lsp-mode hadn't seen before blocked forever on
+   a synchronous "import project?" minibuffer prompt — and because Emacs
+   is single-threaded, that wedges *every* emacsclient connection, not just
+   the one that opened the file. Fixed with `(setq lsp-auto-guess-root t)`
+   in `config.el`'s existing `after! lsp-mode` block.
+2. `:editor format` was missing entirely, so `clang-format` wasn't
+   installed and indentation was never touched — not a linter gap
+   (`clangd` diagnostics are compile-level: syntax/type/warnings, never
+   whitespace) but a missing formatter. Fixed by adding `clang-format` to
+   the Dockerfile and enabling `(format +onsave)` in `init.el`. Confirmed
+   compiler-agnostic: `clang-format`/`clangd` parse with their own
+   frontend rather than invoking `gcc`/`clang` to build, so this works
+   identically for gcc-built projects.
+
+**Testing**: `smoketest.bats` gained mode-activation checks for
+`.c`/`.cpp`/`.h`/`.mm`/`CMakeLists.txt`, LSP-load checks for `c-mode` and
+`cmake-mode`, localleader keybinding checks (`c-keybindings.el`'s
+format-buffer binding; `cmake-keybindings.el`'s new `+cmake/configure`/
+`+cmake/build` commands, invoking `cmake -B build -S .` / `cmake --build
+build` via `compile` — later renamed from bare `cmake-configure`/`cmake-build`
+to the `+cmake/` prefix, and later still joined by `+cmake/rebuild`/
+`+cmake/clean`; see this file's entries below), and tool-version checks for
+`clang`/`clangd`/`gcc`/
+`g++`/`cmake`/`gdb`/`cmake-language-server`/`vcpkg`/`conan` (40 total
+`@test` cases now, up from 25). A manual debug project
+(`flight-tests/c/`: `main.c`/`greet.c`/`greet.h` behind a small
+`CMakeLists.txt`) was used for live container testing of both bugs above
+before they were confirmed fixed via `smoketest.bats`. Both fixes and all
+Dockerfile/`packages.el`-adjacent additions applied to the x86_64 tree in
+lockstep, matching this project's established convention.
+
+**Outstanding at the time this entry was first written**: the debugger half
+of "full support" looked unwired. That assumption was wrong — corrected
+immediately below, same day. Not yet committed to git either; these
+changes (both trees) are still sitting as uncommitted working-tree
+modifications.
+
+---
+
+#### Follow-up, same day: C debugger support was already fully wired
+
+Went looking for how to wire `gdb` into the IDE (the gap noted just above)
+and found there was nothing left to do. The original project plan (this
+file's own "Language stack decisions" section, written 2026-05-06) says
+"Debugger: `gdb` via dap-mode" — but that's stale: Doom's `:tools debugger`
+module doesn't use `dap-mode`/`dap-utils`/vsix-downloaded VS Code extensions
+at all anymore. Read the module's actual source at this project's pinned
+Doom commit (`4e0dbb9`, `modules/tools/debugger/{config,packages}.el` and
+`README.org`, fetched directly via `gh api` rather than assumed from
+memory of an older Doom): it installs
+[`dape`](https://github.com/svaante/dape) (pinned commit `48b3db3`), a
+pure-Elisp DAP client with no VS Code extension dependency.
+
+`dape`'s own source (`dape-configs`, also read directly rather than
+assumed) ships a **built-in `gdb` template already covering
+`c-mode`/`c-ts-mode`/`c++-mode`/`c++-ts-mode`** (plus Go and Hare), driven by
+GDB's own native `--interpreter=dap` support (GDB ≥ 14.1, no separate
+adapter binary, no Node.js, nothing to download) — exactly the `gdb`
+binary already installed in this Dockerfile for the earlier C/CMake work.
+Its `ensure` function runs `gdb --version` and throws `user-error` below
+14.1; checked the actual apt-resolved version against the real archive
+index rather than assuming — resolute/arm64 ships `gdb` 17.1-2ubuntu1,
+noble/amd64 ships 15.0.50, both comfortably clear.
+
+Separately, `:config (default +bindings)` (also already enabled in
+`init.el`, present since project start) turned out to already bind a full
+`SPC d ...` global prefix to every `dape` command that exists —
+start/pause/continue/next/step-in/step-out/restart, breakpoint
+toggle/log/expression/hits/remove-all, thread/stack select, watch,
+evaluate, disconnect, quit — read directly from Doom's
+`modules/config/default/+evil-bindings.el` at the pinned commit rather
+than assumed present. `+debugger/start` (bound to `SPC d d` and also `SPC
+o d`) is a plain `defalias` for `dape` itself.
+
+Net result: no Dockerfile change, no `config.el`/`init.el` `:lang`/`:tools`
+change, no new keybinding file — every piece (module, package, gdb binary,
+global keybindings) was already in place before this session started.
+Only one real fix made: `init.el`'s `(debugger +lsp)` dropped the stray
+`+lsp` flag — the module's own `README.org` states "This module has no
+flags," so the flag was inert dead syntax, not a meaningful toggle.
+
+Added `smoketest.bats` coverage to turn this finding into a regression
+guard rather than leaving it as an unverified read of upstream source: a
+`gdb --version` major-version floor check (`>= 14`), a check that
+`dape-configs`' `gdb` entry's `modes` list actually contains `c-mode` and
+`c++-mode`, and a check that `SPC d d` resolves to `dape` in a `c-mode`
+buffer. 43 `@test` cases now (was 40).
+
+**Not verified**: an actual live debug session (compile with `-g`, `SPC d
+d`, select the `gdb` config, hit a breakpoint) was not run end-to-end —
+this environment has no docker/container access, same limitation noted
+throughout this log. The smoketest additions confirm every piece is
+correctly *wired*, not that a real GDB DAP handshake succeeds inside the
+container; that's the one thing still worth Josiah confirming live.
+
+---
+
+#### `cmake-keybindings.el`: rebuild/delete-build bindings, then a style-guide pass
+
+Josiah noticed `+cmake/build`'s incremental Make cache was hiding a
+compiler warning (an unused variable) during flight-test iteration — the
+prompting incident. Added two more localleader commands alongside the
+existing configure/build pair: `SPC m b r` (`cmake --build build
+--clean-first`, forces every file to recompile) and `SPC m b d` (`rm -rf
+build`, full teardown — distinct from `--clean-first`, which only clears
+compiled objects via the underlying build tool and leaves `CMakeCache.txt`
+and the rest of the generated build system in place).
+
+Josiah then asked for a review of this file (and the day's other changes)
+against `ELISP-STYLE-GUIDE.md`/`ELISP-ARCHITECTURE-GUIDE.md`/
+`DOOM-EMACS-GUIDE.md`, DRY, and general Doom/elisp convention. Two real
+findings survived scrutiny, both fixed:
+
+1. **Naming.** The original `cmake-configure`/`cmake-build` (and the two
+   just added, matching that existing local pattern) were bare `cmake-*`
+   names with no project namespace — a direct violation of this file's own
+   `ELISP-STYLE-GUIDE.md` §3.2 ("every top-level symbol gets a prefix"),
+   and inconsistent with the Doom-idiomatic `+module/name` convention
+   already used elsewhere in this exact project (`go-keybindings.el`'s
+   `+go/playground-yank`). Renamed to `+cmake/configure`, `+cmake/build`,
+   `+cmake/rebuild`, `+cmake/clean`.
+
+2. **Project-root anchoring.** All four commands ran `compile` against
+   whatever `default-directory` happened to be — correct only when
+   invoked from a buffer visiting the *top-level* `CMakeLists.txt`. A
+   nested subdirectory `CMakeLists.txt` (an `add_subdirectory()` target)
+   would build or `rm -rf` a `build/` in the wrong place. The first fix
+   considered — `projectile-project-root` — was checked against this
+   project's own `flight-tests/c/` before adopting it, and turned out to
+   be actively wrong: that directory has no `.git` of its own, so
+   `projectile-project-root` resolves to the *outer* `docker-emacs` repo
+   root (no top-level `CMakeLists.txt` there at all), which would make
+   `+cmake/clean`'s `rm -rf build` run with a far larger and wrong blast
+   radius than the bug being fixed. Wrote `+cmake--root` instead: walks
+   upward via `locate-dominating-file` past every nested `CMakeLists.txt`
+   until no further ancestor has one, landing on the outermost project
+   directory with no VCS dependency at all. All four commands now
+   `let`-bind `default-directory` to `(+cmake--root)` around the `compile`
+   call.
+
+`smoketest.bats`'s keybinding-resolution test updated to match the
+renamed symbols and now checks all four bindings (was two); still 43
+`@test` cases (renames don't add tests). Also caught and fixed, while
+reviewing: the x86_64 tree's copy of that same test had silently fallen
+out of lockstep — it still only checked configure/build even after the
+aarch64 tree gained rebuild/clean coverage in the debugger-review pass
+above. Both trees now match exactly.

@@ -28,6 +28,10 @@ ARG NFM_SHA256=f0f624d9b474bea1662cf7e862d44aebe1ae1f6c7f9cb7a0ca5d0e5ac9561c60
 ARG ZSHDB_VERSION=1.1.4
 ARG NU_VERSION=0.114.1
 ARG NU_SHA256=39944812ee619736fd50828e66c96b91747c1e189ccddac89c3ac1a02e0614f2
+ARG CMAKE_LANGUAGE_SERVER_VERSION=0.1.11
+ARG CONAN_VERSION=2.30.0
+ARG VCPKG_VERSION=2026.06.24
+ARG NUPM_COMMIT=9a28419bf91aadc58999d83e0f6ef8d9dbfa7d9f
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -87,6 +91,7 @@ RUN apt-get update -y && \
       unzip \
       wget \
       xz-utils \
+      zip \
       `# --- cli live troubleshooting tools ---` \
       aspell \
       fd-find \
@@ -151,6 +156,22 @@ RUN apt-get update -y && \
       npm \
       shellcheck \
       zsh \
+      `# --- c/c++/cmake ide ---` \
+      `# ccls deliberately excluded: no apt package, no prebuilt release` \
+      `# binaries -- building it from source against a matching libclang` \
+      `# would be real added fragility for a server Doom's own :lang cc` \
+      `# module already deprioritizes below clangd. gcc is installed` \
+      `# earlier above already, for tree-sitter grammar compilation.` \
+      clang \
+      clangd \
+      clang-format \
+      cmake \
+      g++ \
+      gdb \
+      ninja-build \
+      `# pipx here rather than its own group -- only pulled in for` \
+      `# cmake-language-server and conan, both installed just below.` \
+      pipx \
       `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
@@ -247,6 +268,67 @@ RUN git clone "${DOOM_REPO}" /home/${USERNAME}/.config/emacs \
 RUN emacs --batch -Q --eval "(progn \
       (setq treesit-language-source-alist '((nu \"https://github.com/nushell/tree-sitter-nu\" nil \"src\"))) \
       (treesit-install-language-grammar 'nu \"/home/${USERNAME}/.config/emacs/.local/cache/tree-sitter\"))"
+
+# cmake-language-server 0.1.11 (unmaintained since Jan 2025, per its repo's
+# own commit history) declares `requires-python <3.14`, which this Ubuntu
+# release's system Python (3.14.4) fails outright -- confirmed live in a
+# throwaway container rather than assumed. --ignore-requires-python installs
+# it anyway, but its own loose `pygls>=1.1.1` constraint then resolves the
+# newest pygls (2.x), which removed `LanguageServer` from `pygls.server` as
+# a breaking change -- confirmed live too (ImportError at runtime, not just
+# an overcautious version cap). Pinning back to pygls 1.3.1 (the last 1.x
+# release) via `pipx inject` restores the API cmake-language-server expects;
+# confirmed --version actually runs correctly with this combination before
+# committing to it here. conan needed neither workaround.
+RUN pipx install cmake-language-server=="${CMAKE_LANGUAGE_SERVER_VERSION}" --pip-args="--ignore-requires-python" \
+    && pipx inject cmake-language-server pygls==1.3.1 --force \
+    && pipx install conan=="${CONAN_VERSION}"
+
+ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
+
+# vcpkg has no apt package or standalone release binary for the tool itself --
+# it's meant to live as a clone alongside your projects, so this clones it to
+# a stable, well-known location instead and exposes it on PATH. Bootstrap
+# fetches a prebuilt vcpkg-tool release when one matches this arch, falling
+# back to compiling from source (needs cmake/ninja-build/g++, already
+# installed above) -- confirmed both paths' prerequisites (curl/zip/unzip/
+# tar/cmake/git) directly against bootstrap.sh rather than assumed.
+RUN git clone --depth 1 --branch "${VCPKG_VERSION}" https://github.com/microsoft/vcpkg.git /home/${USERNAME}/vcpkg \
+    && /home/${USERNAME}/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+ENV VCPKG_ROOT=/home/${USERNAME}/vcpkg
+ENV PATH="${VCPKG_ROOT}:${PATH}"
+
+# nupm (nushell/nupm) is nushell's own official package manager -- unlike
+# vcpkg/Conan, it has no apt/pip/tagged-release install path at all: it's a
+# self-hosted Nushell module you clone and `use`, which can then install
+# itself and other packages. It's also explicitly marked "experimentation
+# stage, not for serious use" by its own maintainers, and warns it may need
+# nightly Nushell rather than the latest stable -- confirmed live in a
+# throwaway container that this pinned commit (whose own CI tests against
+# nu 0.114.0, one patch behind our pinned 0.114.1) bootstraps and installs
+# packages correctly before committing to it here, rather than assumed
+# compatible. `--no-confirm` and pre-creating $NUPM_HOME sidestep an
+# interactive first-run prompt that would otherwise hang a non-interactive
+# build. Only nupm itself lives here, same as vcpkg/Conan above -- a
+# specific package it can install (nutest, or anything else) belongs to
+# whichever project actually needs it, installed there via nupm, not baked
+# into every image regardless of use.
+#
+# `nupm install <path> --path` needs <path> to be the directory that
+# directly contains nupm.nuon (the checkout root, since this pinned
+# commit's own "Migrate to New Commands" restructuring keeps nupm.nuon at
+# the repo root with the actual module code nested one level down in
+# nupm/) -- passing the bare word "nupm" here (as nupm's own README
+# self-install example does) only works by coincidence when the checkout
+# happens to be cloned into a directory literally named "nupm", since it's
+# resolved as a relative path from CWD, not a package name lookup.
+# Confirmed live after that exact mismatch broke this build once already.
+RUN mkdir -p /home/${USERNAME}/.config/nushell/nupm \
+    && git clone https://github.com/nushell/nupm.git /home/${USERNAME}/.cache/nupm-src \
+    && cd /home/${USERNAME}/.cache/nupm-src && git checkout "${NUPM_COMMIT}" \
+    && nu -c "use /home/${USERNAME}/.cache/nupm-src/nupm; nupm install /home/${USERNAME}/.cache/nupm-src --force --path --no-confirm" \
+    && rm -rf /home/${USERNAME}/.cache/nupm-src \
+    && echo '$env.NU_LIB_DIRS = ($env.NU_LIB_DIRS? | default [] | append (\"/home/'"${USERNAME}"'/.config/nushell/nupm/modules\" | path expand))' >> /home/${USERNAME}/.config/nushell/env.nu
 
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 
