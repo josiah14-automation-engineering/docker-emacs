@@ -96,17 +96,109 @@ WRAPPER
   fi
 fi
 
+# Bridge the host's real Docker engine in rather than running a second
+# dockerd (with its own separate image/container storage) inside this
+# image -- docker.io here installs the CLIENT only. The socket is rootful
+# (owned root:docker, group-rw), so the container's runtime user needs
+# supplementary membership in a group matching that GID; `--group-add`
+# resolves it at container-start time rather than baking a specific GID
+# into the image, since it can differ per host. MOUNT_HOST_DOCKER=0 skips
+# this (e.g. a host with no Docker installed at all).
+docker_mounts=()
+if [[ -S /var/run/docker.sock ]] && [[ "${MOUNT_HOST_DOCKER:-1}" == "1" ]]; then
+  docker_mounts+=(
+    -v /var/run/docker.sock:/var/run/docker.sock
+    --group-add "$(stat -c '%g' /var/run/docker.sock)"
+  )
+else
+  echo "warning: /var/run/docker.sock not found -- docker inside the IDE won't reach the host engine" >&2
+fi
+
+# Same idea for Podman, but rootless: the socket already lives under
+# XDG_RUNTIME_DIR, which is bind-mounted unconditionally below, so no
+# separate -v is needed here -- just point the podman CLIENT at it.
+# Unlike Docker, podman has no client/server-only mode by default: with no
+# CONTAINER_HOST set it manages LOCAL storage directly, which inside this
+# image (no local podman storage set up on purpose) would silently create
+# a redundant, broken local store instead of talking to the host. The
+# socket requires the host to run `systemctl --user enable --now
+# podman.socket` once (not on by default); MOUNT_HOST_PODMAN=0 skips this.
+podman_env=()
+if [[ -S "${XDG_RUNTIME_DIR}/podman/podman.sock" ]] && [[ "${MOUNT_HOST_PODMAN:-1}" == "1" ]]; then
+  podman_env+=(-e "CONTAINER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock")
+else
+  echo "warning: host podman.socket not active (systemctl --user enable --now podman.socket) -- podman inside the IDE won't reach the host engine" >&2
+fi
+
 # SSH agent forwarding so `nix develop`/direnv inside the container can
 # authenticate git+ssh:// flake inputs using the host's agent and known_hosts.
+#
+# Mounted at the IDENTICAL host path (not remapped to a fixed /ssh-agent,
+# unlike mercury-ide/logic-ide's own run.sh) -- this is the one bridge in
+# this file that has to compose with a *nested* docker/podman invocation
+# (e.g. running logic-ide's own run.sh from inside this container, via
+# the docker/podman bridge above). A DooD `docker run` issued from inside
+# this container is still executed by the HOST's real daemon (that's what
+# the bridged socket means), which resolves bind-mount SOURCE paths
+# against the HOST filesystem, not this container's. A fixed path like
+# `/ssh-agent` is meaningless there -- the daemon would try to bind a
+# host path that doesn't exist, which is exactly the "not a directory"
+# OCI error this fixes (confirmed live: reproduced by tracing what
+# `logic-ide/run.sh` actually sends the daemon when run from inside this
+# container with the old remap in place). The real host path stays
+# meaningful in both places, so it composes correctly with any further
+# nesting.
 ssh_mounts=()
 if [[ -n "${SSH_AUTH_SOCK:-}" ]]; then
   ssh_mounts+=(
-    -e SSH_AUTH_SOCK=/ssh-agent
-    -v "${SSH_AUTH_SOCK}:/ssh-agent"
+    -e SSH_AUTH_SOCK
+    -v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}"
   )
 fi
 if [[ -d "${HOME}/.ssh" ]]; then
   ssh_mounts+=(-v "${HOME}/.ssh:/home/${USER}/.ssh:ro")
+fi
+
+# Environment injection: this image's job is a reproducible, stable
+# *tooling* environment, not a sandbox -- so a script tested inside the
+# IDE via Emacs keybindings/M-x (sh-execute-region, compile,
+# async-shell-command, ...) should see the same environment it would on
+# the real host, not a re-derived approximation. Those are all
+# non-interactive invocations, so mounting dotfiles wouldn't reach this at
+# all (non-interactive shells don't source .bashrc/.zshrc even on the
+# host itself) -- the actual fix is capturing this already-resolved
+# environment (this shell already sourced its own dotfiles before running
+# run.sh) and threading it straight into the container as -e flags,
+# rather than trying to re-source the right dialect's rc file per
+# execution context.
+#
+# Excluded: tool-resolution variables (PATH, LD_LIBRARY_PATH, MANPATH,
+# PYTHONPATH) -- overriding these with host values would reintroduce
+# exactly the version drift this image exists to prevent, trading script
+# fidelity for breaking the container's own reproducibility. Also
+# excluded: variables this script already sets explicitly by name
+# elsewhere (SSH_AUTH_SOCK, XDG_RUNTIME_DIR, WAYLAND_DISPLAY, GDK_BACKEND,
+# DISPLAY) -- a blanket pass-through would just duplicate those, not
+# conflict (they're the same value either way), but there's no reason to
+# set the same key twice; HOME/USER, already correct by construction (the
+# container's own user mirrors the host username at build time); and
+# shell-instance-mechanical variables that are either meaningless or
+# actively wrong carried into a different process/directory (PWD, OLDPWD,
+# SHLVL, TERM, _).
+#
+# This does NOT cover aliases or shell functions -- neither is part of
+# the process environment (bash can export functions via a special
+# encoding; zsh has no equivalent), so they only exist if a real
+# interactive shell actually sources the rc file -- a vterm concern, not
+# this. INJECT_HOST_ENV=0 disables this entirely.
+host_env=()
+if [[ "${INJECT_HOST_ENV:-1}" == "1" ]]; then
+  host_env_exclude='^(PATH|LD_LIBRARY_PATH|MANPATH|PYTHONPATH|SSH_AUTH_SOCK|XDG_RUNTIME_DIR|WAYLAND_DISPLAY|GDK_BACKEND|DISPLAY|HOME|USER|PWD|OLDPWD|SHLVL|TERM|_)$'
+  while IFS= read -r -d '' entry; do
+    key="${entry%%=*}"
+    [[ "$key" =~ $host_env_exclude ]] && continue
+    host_env+=(-e "$entry")
+  done < <(env -0)
 fi
 
 exec docker run --rm \
@@ -119,7 +211,10 @@ exec docker run --rm \
   -v "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro" \
   -v "${HOME}/Development/personal:/home/${USER}/Development/personal" \
   "${nix_mounts[@]+"${nix_mounts[@]}"}" \
+  "${docker_mounts[@]+"${docker_mounts[@]}"}" \
+  "${podman_env[@]+"${podman_env[@]}"}" \
   "${ssh_mounts[@]+"${ssh_mounts[@]}"}" \
+  "${host_env[@]+"${host_env[@]}"}" \
   "${flight_mounts[@]+"${flight_mounts[@]}"}" \
   -w "/home/${USER}/Development/personal" \
   "${IMAGE}" &

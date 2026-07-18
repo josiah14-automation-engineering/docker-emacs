@@ -199,6 +199,125 @@ Verify the shared store from inside either container with `bats nix-smoketest.ba
    `nix_mounts` array with the five-path RO/RW split described in "Shared Nix store"
    above. Copy/adapt `nix-smoketest.bats` to verify the wiring.
 
+## Docker and Podman
+
+systems-ide (30.2, both aarch64 and x86_64) installs the `docker` and `podman`
+**clients** only — neither engine's daemon or image/container storage runs inside the
+image. `run.sh` bridges each client to the corresponding engine already running on the
+host, the same "share the host's state instead of duplicating it" idea as the Nix
+store above, for the same reason: container image/volume storage is often many GB, and
+running a second engine inside the IDE would mean a second copy of that storage rather
+than one shared copy.
+
+### Docker
+
+Rootful, single system-wide `docker.service`, socket at the fixed path
+`/var/run/docker.sock`, owned `root:docker` with group-rw permissions. `run.sh`
+bind-mounts it at the identical path (the Docker CLI's own default lookup, so no
+`DOCKER_HOST` is needed) and adds `--group-add "$(stat -c '%g' /var/run/docker.sock)"`
+so the container's runtime user can reach it without root — resolved at
+container-start time rather than baked into the image, since the GID can differ per
+host. `MOUNT_HOST_DOCKER=0` skips this.
+
+### Podman
+
+Rootless, per-user `podman.socket` (a systemd **user** unit — not enabled by default
+even if `podman` itself is installed; run `systemctl --user enable --now
+podman.socket` once). Socket lives at `$XDG_RUNTIME_DIR/podman/podman.sock`, owned
+directly by the invoking user, no group trick needed.
+
+**Podman's remote mode is not optional the way it might look.** Unlike the Docker CLI
+(always a thin client, no other mode exists), the `podman` CLI defaults to managing
+*local* storage directly whenever no `CONTAINER_HOST`/`--remote` is set. With no local
+podman storage configured in the image on purpose, an unset `CONTAINER_HOST` doesn't
+fail loudly — it silently starts building a redundant, broken local store inside the
+container instead of ever reaching the host. `run.sh` always sets `CONTAINER_HOST`
+explicitly for this reason. `MOUNT_HOST_PODMAN=0` skips the whole bridge.
+
+### Using both from inside Emacs
+
+`:tools docker` (Doom's `docker.el`) is already enabled — `SPC o D` opens its tabulated
+container/image/volume UI, and `dockerfile-mode` already matches `Containerfile` as
+well as `Dockerfile`. `docker.el` only targets one binary at a time via the
+`docker-command` variable (default `"docker"`); `docker-keybindings.el` adds `SPC o c`
+to toggle it to `"podman"` and back, since there's no built-in way to view both
+through the same UI simultaneously.
+
+### Known limitations
+
+- **Podman needs a one-time host prerequisite** (`systemctl --user enable --now
+  podman.socket`) that isn't part of any package install — `run.sh` prints a warning
+  if the socket isn't found rather than failing silently.
+- **Whichever engine builds an image is the only one that can see it.** Docker and
+  Podman use separate storage backends by default; an image built with `docker build`
+  won't show up under `podman images` even with both bridged, and vice versa. This
+  isn't a bug in the bridge — it's the same as running both engines side-by-side on
+  the host directly.
+- **No isolation between the IDE and the host's real containers, on purpose.** `docker
+  rm`/`podman rmi` run from inside the IDE affect the same containers/images visible
+  from a host terminal. The point of this bridge is exactly that — a traditional IDE
+  doesn't sandbox you from your own machine either.
+
+### Wiring a new IDE for this
+
+1. Add `docker.io` and/or `podman` to the Dockerfile's apt list (client only — no
+   `dockerd`/podman-storage setup needed).
+2. `:tools docker` in `init.el` if not already enabled; no flags needed for this.
+3. In `run.sh`, add the conditional `docker_mounts`/`podman_env` (or `podman_mounts`,
+   if the port has no unconditional `XDG_RUNTIME_DIR` mount already — see systems-ide's
+   two `run.sh`s for both shapes) blocks, guarded by `MOUNT_HOST_DOCKER`/
+   `MOUNT_HOST_PODMAN` matching the pattern above.
+4. Copy `docker-keybindings.el` and its `load!` line if the engine-toggle convenience
+   is wanted.
+
+## Environment injection
+
+`run.sh` also captures the invoking shell's environment and threads it into the
+container, so a script exercised through Emacs keybindings/`M-x`
+(`sh-execute-region`, `compile`, `async-shell-command`, ...) behaves the way it would
+on the real host rather than a re-derived approximation. This container's job is a
+reproducible, stable *tooling* environment, not a sandbox, so a script that silently
+behaves differently inside the IDE than it would on the host defeats the point of
+testing it there.
+
+Mechanically: `env -0` (NUL-separated, safe against embedded newlines) from the shell
+that runs `run.sh` — already fully dotfile-sourced, since `run.sh` always runs inside
+an interactive host shell — piped through a regex exclusion filter, and the survivors
+passed through as `-e KEY=value`. `INJECT_HOST_ENV=0` disables it entirely.
+
+**The exclusion list is the important part, not the capture.** Blind wholesale
+injection would work against the container's own purpose: `PATH`, `LD_LIBRARY_PATH`,
+`MANPATH`, and `PYTHONPATH` describe *how to find binaries*, and overriding them with
+the host's own values would reintroduce exactly the version drift this image exists to
+prevent. Also excluded: variables `run.sh` already bridges deliberately to a
+**different** value than the raw host one (`SSH_AUTH_SOCK`, `XDG_RUNTIME_DIR`,
+`WAYLAND_DISPLAY`, `GDK_BACKEND`, `DISPLAY`), `HOME`/`USER` (already correct by
+construction — the container's own user is built at image-build time to mirror the
+host username), and shell-instance-mechanical variables that are either meaningless or
+actively wrong carried into a different process/directory (`PWD`, `OLDPWD`, `SHLVL`,
+`TERM`, `_`).
+
+### Known limitations
+
+- **This covers variables only — not aliases or shell functions.** Neither is part of
+  the process environment (bash can export functions via a special encoding; zsh has
+  no equivalent), so neither survives this mechanism regardless of what's injected.
+  They only exist if a real interactive shell actually sources an rc file — relevant
+  to opening a real shell in `vterm`, not to `M-x`/keybinding-driven execution. If your
+  own bash/zsh/nu function library matters inside the IDE, the intended path is
+  packaging it as its own git-pullable dependency and cloning it in, not baking
+  dotfiles into image config.
+- **Values are captured once, at container launch**, not live — changing an
+  environment variable in your host shell after the container is already running has
+  no effect on it.
+
+### Wiring a new IDE for this
+
+Add the `host_env` capture block to the `host/*`/`run.sh` launcher (see systems-ide's
+two `run.sh`s), keeping the exclusion list in sync with whatever that image's own
+Dockerfile deliberately bridges to a different value (so the blind capture never races
+a specific remapping) plus the standard tool-resolution variables above.
+
 ## Alternatives
 
 - [flycheck/emacs-cask](https://hub.docker.com/r/flycheck/emacs-cask): minimal Emacs compiled from source with Cask

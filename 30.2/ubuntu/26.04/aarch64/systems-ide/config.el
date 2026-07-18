@@ -90,3 +90,4 @@
 (load! "nu-keybindings")
 (load! "c-keybindings")
 (load! "cmake-keybindings")
+(load! "docker-keybindings")

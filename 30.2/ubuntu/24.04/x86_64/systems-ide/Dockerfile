@@ -157,6 +157,15 @@ RUN apt-get update -y && \
       `# pipx here rather than its own group -- only pulled in for` \
       `# cmake-language-server and conan, both installed just below.` \
       pipx \
+      `# --- container engines: docker/podman CLIENTS only ---` \
+      `# No dockerd/podman storage runs in this image -- both engines and` \
+      `# all image/container storage live on the HOST; run.sh bridges the` \
+      `# host's docker.sock (bind mount + --group-add) and podman.sock` \
+      `# (already covered by the existing XDG_RUNTIME_DIR mount, plus` \
+      `# CONTAINER_HOST) into the container. Keeping storage host-side` \
+      `# avoids duplicating potentially many-GB image/container state.` \
+      docker.io \
+      podman \
       `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
@@ -327,6 +336,7 @@ COPY --chown=${USERNAME}:${USERNAME} c-keybindings.el      /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} rust-keybindings.el   /home/${USERNAME}/.config/doom/rust-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} zig-keybindings.el    /home/${USERNAME}/.config/doom/zig-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} cmake-keybindings.el  /home/${USERNAME}/.config/doom/cmake-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} docker-keybindings.el /home/${USERNAME}/.config/doom/docker-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} lua-keybindings.el    /home/${USERNAME}/.config/doom/lua-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el    /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.config/doom/bats-keybindings.el

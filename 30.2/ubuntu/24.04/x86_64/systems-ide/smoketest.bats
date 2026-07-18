@@ -27,6 +27,10 @@ setup_file() {
 #!/bin/bash
 echo hi
 EOF
+  cat > /tmp/smoketest/test-shebang.sh <<'EOF'
+#!/usr/bin/env bash
+echo hi
+EOF
   cat > /tmp/smoketest/test.zsh <<'EOF'
 #!/bin/zsh
 echo hi
@@ -183,6 +187,13 @@ eval_elisp() {
   [[ "$output" =~ "2.30.0" ]]
 }
 
+@test "docker and podman clients are installed" {
+  run docker --version
+  [ "$status" -eq 0 ]
+  run podman --version
+  [ "$status" -eq 0 ]
+}
+
 @test "opening a .bash file activates sh-mode with the bash dialect" {
   # sh-mode is the only major mode for shell scripts; bash vs zsh is tracked
   # by the buffer-local sh-shell variable, not a separate major mode (this is
@@ -191,6 +202,18 @@ eval_elisp() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "sh-mode" ]]
   [[ "$output" =~ "bash" ]]
+}
+
+@test "sh-shell-file matches the shebang-detected dialect (shell-config.el's +shell--sync-shell-file)" {
+  # Regression test: sh-set-shell's automatic (non-interactive) dialect
+  # detection never used to update sh-shell-file, leaving it at the global
+  # default (dash) regardless of sh-shell -- silently breaking
+  # sh-execute-region (SPC m e e / SPC m e b) on any bash-only syntax for a
+  # plain .sh file that only carries a #!/usr/bin/env bash shebang (no
+  # .bash extension to trigger this project's own bash-mode instead).
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test-shebang.sh") (format "%s %s" sh-shell sh-shell-file))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "bash bash" ]]
 }
 
 @test "opening a .zsh file activates sh-mode with the zsh dialect" {
@@ -300,6 +323,18 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC d d")))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "dape" ]]
+}
+
+@test "global keybinding SPC o D resolves to docker (config/default :tools docker)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.bash") (key-binding (kbd "SPC o D")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "docker" ]]
+}
+
+@test "SPC o c toggles docker-command between docker and podman" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.bash") (setq docker-command "docker") (call-interactively (key-binding (kbd "SPC o c"))) docker-command)'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "podman" ]]
 }
 
 @test "global keybinding SPC b c resolves to flycheck-buffer" {

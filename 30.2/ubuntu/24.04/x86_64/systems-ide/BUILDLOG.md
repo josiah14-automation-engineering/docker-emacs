@@ -1572,3 +1572,254 @@ reviewing: this tree's copy of that same test had silently fallen out of
 lockstep — it still only checked configure/build even after the aarch64
 tree gained rebuild/clean coverage in the debugger-review pass above.
 Both trees now match exactly.
+
+---
+
+#### Docker and Podman support: bridge the host's engines, don't run a second one
+
+Motivated by the FaradAI sandbox project, which manages its own containers
+on the host. `docker`/`podman` were both entirely absent before this (no
+`:tools docker` customization beyond the bare module, no podman anywhere).
+
+**Design decision, made explicit before any code**: don't install a second
+`dockerd`/podman storage backend inside this image at all. Container
+image/volume storage is often many GB; running an independent engine
+inside the IDE container would mean duplicating that storage rather than
+sharing it. Instead, install only the **client** binaries (`docker.io`,
+`podman` — both confirmed present in `universe` on both distros via the
+real archive index, same verification standard as every other package
+here: `docker.io` 29.1.3 on resolute/arm64, 24.0.7 on noble/amd64; `podman`
+5.7.0 on resolute/arm64, 4.9.3 on noble/amd64 — versions differ across
+distros and were left unpinned, matching how `clang`/`cmake`/`gdb` are
+already handled) and bridge each client to the **host's** real engine over
+its API socket, exactly the way `run.sh` already bridges Nix.
+
+**Chose not to reuse the Nix bridge's approach.** That bridge exists
+because a Nix store is already a portable, content-addressed artifact —
+sharing it avoids a second copy of the *same* reproducible thing, and
+needed real complexity to pull off (`ldd`-based library rediscovery every
+launch, a `LD_LIBRARY_PATH`-scoped wrapper script, Fedora-vs-Ubuntu ABI
+reconciliation). Docker and Podman don't need any of that: both engines
+expose a documented, purpose-built remote API over a Unix socket
+specifically so a thin client elsewhere can talk to them — a real
+client/server boundary, not a filesystem store being creatively
+relocated. Bridging the socket is the intended, supported way to do this,
+not a workaround.
+
+**Docker**: rootful, single system-wide `docker.service`, socket at the
+fixed path `/var/run/docker.sock`, owned `root:docker` with group-rw
+permissions (confirmed against the host directly rather than assumed).
+Bind-mounted at the identical path — the Docker CLI's own default lookup
+path, so no `DOCKER_HOST` env var is needed at all. The socket's group
+ownership is the one real wrinkle: the container's runtime user needs
+supplementary membership in a group matching that GID to access it
+without root. Resolved with `docker run --group-add
+"$(stat -c '%g' /var/run/docker.sock)"` at container-start time (`run.sh`)
+rather than baking a specific GID into the image — the GID can differ
+per host, and this is Docker's own documented pattern for exactly this
+situation (the standard "mount the docker socket" DooD — Docker-outside-
+of-Docker — approach used by most CI runners).
+
+**Podman**: rootless, per-user `podman.socket` (a systemd *user* unit,
+confirmed **not enabled by default** even though `podman` itself was
+already installed on the reference host — `systemctl --user enable --now
+podman.socket` was required and run directly against it as part of this
+session, since nothing works without it). Socket lives at
+`$XDG_RUNTIME_DIR/podman/podman.sock`, owned directly by the invoking
+user — no group trick needed, unlike Docker's rootful model.
+**Podman's remote mode is not optional the way it might look**: unlike
+the Docker CLI (always a thin client, no other mode exists), the `podman`
+CLI defaults to managing *local* storage directly whenever no
+`CONTAINER_HOST`/`--remote` is set — with no local podman storage
+configured in this image on purpose, an unset `CONTAINER_HOST` wouldn't
+fail loudly, it would silently start building a redundant, broken local
+store inside the container instead of ever reaching the host. Confirmed
+this distinction directly rather than assuming Podman's API-socket
+behavior mirrors Docker's.
+
+**This port needed one adjustment the aarch64 port didn't.** aarch64's
+`run.sh` already bind-mounts the entire `XDG_RUNTIME_DIR` unconditionally
+(for Wayland), so its podman socket needs no dedicated `-v` at all once
+the host service is active — just the `CONTAINER_HOST` env var. This
+port's `run.sh` has no such mount at all (X11/`DISPLAY` here, not
+Wayland), so the podman socket is bind-mounted explicitly by its own
+specific path instead. Both ports gained a `MOUNT_HOST_DOCKER`/
+`MOUNT_HOST_PODMAN` escape hatch each (default on), mirroring
+`MOUNT_HOST_NIX`'s existing shape, plus an informational `stderr` warning
+when either socket is missing — deliberately not silent like the Nix
+mount's bare `if`, since "you forgot to `systemctl --user enable
+podman.socket`" is an easy, easy-to-miss trap worth surfacing at
+container-launch time rather than as a confusing error from inside Emacs
+later.
+
+**Doom/config.el side turned out to need almost nothing.** `dockerfile-mode`
+(from the already-enabled `:tools docker` module) already matches
+`Containerfile` in its own `auto-mode-alist` entry — confirmed directly
+from source rather than assumed, so no new mode-alist wiring was needed
+for Podman's preferred naming. `docker.el`'s `M-x docker` tabulated
+management UI is already bound to `SPC o D` by Doom's own `:config default`
+the moment `:tools docker` is enabled — also confirmed directly from
+`+evil-bindings.el` rather than assumed, so no new binding was needed to
+launch it either. The one real gap: `docker.el` only targets **one**
+backend at a time via the `docker-command` variable (default `"docker"`,
+left untouched), and there's no built-in way to view both docker and
+podman through the same UI simultaneously — so the only new elisp
+written is a small toggle, `docker-keybindings.el`'s `+docker/toggle-engine`
+(`SPC o c`, flips `docker-command` between `"docker"`/`"podman"`). Checked
+the full `SPC o` ("open") prefix-map in `+evil-bindings.el` directly before
+picking `"c"` — `"e"`/`"E"` are already claimed by eshell (also enabled in
+this project), which a guess would have silently collided with.
+
+**Testing**: `smoketest.bats` gained a `docker --version`/`podman
+--version` install check, a check that `SPC o D` resolves to `docker`, and
+a check that `SPC o c` actually flips `docker-command` from `"docker"` to
+`"podman"` when invoked. 46 `@test` cases now (was 43). The actual
+socket-bridge behavior (whether the in-container `docker ps`/`podman ps`
+really reaches the host's containers) can't be exercised by the bare
+`bats smoketest.bats` invocation — same limitation as Nix's live
+functionality, which also only gets a version/package-existence check
+here and its real behavior verified via `nix-smoketest.bats` under
+`run.sh`'s actual mounts. Not yet verified end-to-end against a live
+rebuilt image — the actual `docker build` + `run.sh` cycle wasn't run
+this session, only the host prerequisites (package availability, socket
+paths/permissions, `podman.socket` enablement) were checked directly
+against the aarch64 host; pending Josiah's rebuild and retest on this
+port specifically.
+
+---
+
+#### Bug: `SPC m e b` on `run.sh` failed with `/bin/sh: [[: not found`
+
+Rebuilt aarch64 image confirmed the docker/podman bridge works (`SPC o D`
+showed real host containers). Separately, Josiah hit `sh-execute-region`
+("Execute buffer", `SPC m e b`) failing on `run.sh` itself with `/bin/sh:
+9: [[: not found` — a dash-only failure, not a bash one, even though
+`run.sh` is `#!/usr/bin/env bash` and its modeline correctly showed the
+bash dialect.
+
+Root cause isolated by reading `sh-script.el` directly (installed source,
+not assumed): `sh-execute-region`'s docstring says plainly "The executed
+subshell is `sh-shell-file`" — but `sh-set-shell` only *updates*
+`sh-shell-file` when called with a non-nil `insert-flag` (its third arg),
+which happens only when a shebang line is being interactively
+rewritten. The automatic dialect detection that runs for every
+`sh-mode`/`bash-mode`/`zsh-mode`/`ksh-mode` buffer calls exactly
+`(sh-set-shell (sh--guess-shell) nil nil)` — `insert-flag` nil — so
+`sh-shell-file` never gets touched and stays at its global default
+(`/bin/sh`, i.e. dash on this image) regardless of what `sh-shell` was
+correctly detected as. `sh-shell` itself *is* reliably correct (confirmed
+`sh--guess-shell` reads the buffer's own shebang line directly) — this is
+purely a `sh-shell-file`-never-synced bug, present in vanilla
+`sh-script.el` itself, not something introduced by this project's own
+config. It would have affected `SPC m e e`/`SPC m e b` for **any**
+bash-only script in this project (including files opened through this
+project's own `bash-mode`/`zsh-mode`/`ksh-mode`, since those also call
+`sh-set-shell` with a bare single argument) — just never actually
+exercised until now, since the existing smoketest only checks that these
+keybindings *resolve* to the right function, not that invoking them
+actually executes correctly.
+
+Fixed at the root in `shell-config.el`: `+shell--sync-shell-file`, hooked
+onto `sh-mode-hook` (which fires for `bash-mode`/`zsh-mode`/`ksh-mode`
+too, since they derive from `sh-mode` and Emacs runs all ancestor mode
+hooks on activation), sets buffer-local `sh-shell-file` to
+`(symbol-name sh-shell)` — mirroring the value that's already correctly
+detected rather than reimplementing detection. Confirmed hook ordering is
+safe by reading `sh-mode`'s own body directly: `(sh-set-shell
+(sh--guess-shell) nil nil)` runs as part of the mode's own setup, which
+completes before `run-mode-hooks` fires, so `sh-shell` is always already
+correct by the time this hook runs.
+
+**Testing**: added a `test-shebang.sh` fixture (`#!/usr/bin/env bash`,
+deliberately no `.bash` extension, to exercise plain `sh-mode`'s shebang-
+only detection path rather than this project's own extension-driven
+`bash-mode`) and a test asserting both `sh-shell` and `sh-shell-file`
+report `"bash"` after opening it. 47 `@test` cases now (was 46). Confirmed
+via `emacs-lisp-mode`'s `check-parens` (not `fundamental-mode`'s — a
+first attempt there false-flagged on ordinary apostrophes in comments,
+since `fundamental-mode` has no syntax table telling it `'` isn't a
+string delimiter) that `shell-config.el` still parses cleanly in both
+ports. Not yet verified live against a rebuilt image on this port;
+pending Josiah's rebuild.
+
+---
+
+#### `run.sh`: inject the host's environment (not its dotfiles)
+
+Prompted by the `sh-shell-file` bug above: Josiah's real question was
+broader — for a script exercised via Emacs keybindings/M-x
+(`sh-execute-region`, `compile`, `async-shell-command`) to behave the way
+it would on the real host, doesn't the container need pieces of the
+host's environment (his examples: `SSH_AUTH_SOCK`, `USER`, `HOME`, as
+things he assumed came from `.bashrc`)?
+
+First pass at this (mounting `.bashrc`/`.zshrc`/nushell dotfiles,
+mirroring the existing `.gitconfig`/`.ssh` read-only mount pattern) turned
+out to be solving a different problem than the one being asked. Checked
+directly against the aarch64 host rather than assumed: `HOME`/`USER` are
+not set by any dotfile at all (grepped `.bashrc`/`.profile`/`.zshrc`/
+`.zshenv`/`.zprofile` — zero exports; `loginctl` confirms these come from
+the login/session layer, before any rc file runs). `SSH_AUTH_SOCK`
+genuinely *is* shell-managed there (the systemd `ssh-agent.socket` unit
+is loaded but inactive; the real agent socket lives at a path referenced
+directly in `.zshrc`'s tmux-agent-reuse logic) — but that distinction
+doesn't matter for the actual question, because `sh-execute-region`/
+`compile` are **non-interactive** invocations, and non-interactive shells
+don't source `.bashrc`/`.zshrc` even on the real host. Mounting the
+dotfiles wouldn't have reached this case at all, regardless of which
+variables happen to live in them on any given machine.
+
+Reframed once Josiah named the actual point explicitly: this container's
+job is a reproducible, stable *tooling* environment, not a sandbox — so
+the fix isn't per-variable archaeology (`.bashrc` vs login vs systemd
+unit), it's capturing the calling shell's already-fully-resolved
+environment (already dotfile-sourced, since `run.sh` itself always runs
+inside an interactive host shell) and threading it straight into the
+container as `-e` flags at the one point the boundary actually is —
+container launch — rather than trying to re-derive it inside the
+container per shell dialect.
+
+**The one real tension, and it's the interesting part**: blind
+wholesale injection would work against the container's own stated
+purpose. `PATH`/`LD_LIBRARY_PATH`/`MANPATH`/`PYTHONPATH` describe *how to
+find binaries*; overriding them with the host's own values would
+reintroduce exactly the version drift this image exists to prevent —
+trading fidelity to the host's *scripts* for breaking fidelity to the
+image's own *toolchain*. So the design excludes those, plus anything
+this script already bridges deliberately to a **different** value than
+the raw host one (`SSH_AUTH_SOCK`, `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`,
+`GDK_BACKEND`, `DISPLAY` — a blanket pass-through would otherwise race
+against the specific remapping already in place for each), `HOME`/`USER`
+(already correct by construction — the container's own user is built at
+image-build time to mirror the host username), and shell-instance-
+mechanical variables that are either meaningless or actively wrong
+carried into a different process/directory (`PWD`, `OLDPWD`, `SHLVL`,
+`TERM`, `_`).
+
+Implementation: `env -0` (NUL-separated, safe against embedded newlines
+in values) piped through a `while` loop matching each key against a
+regex exclusion list, building a `host_env` array of `-e KEY=value`
+pairs exactly like every other conditional mount block in this file.
+`INJECT_HOST_ENV=0` disables it entirely, matching the
+`MOUNT_HOST_NIX`/`MOUNT_HOST_DOCKER`/`MOUNT_HOST_PODMAN` escape-hatch
+convention already established here.
+
+**Explicitly out of scope, and worth being precise about why**: this
+covers *variables* only. Aliases and shell functions aren't part of the
+process environment at all (bash can export functions via a special
+encoding; zsh has no equivalent mechanism), so neither survives this
+mechanism regardless — they only exist if a real interactive shell
+actually sources the rc file, which is a `vterm`-opened-a-real-shell
+concern, genuinely separate from the M-x/keybinding-execution problem
+this solves. Josiah's own plan for that gap: a separate git-pullable
+library of Bash/Zsh/Nushell functions, versioned and cloned in as a
+dependency rather than baked into image config — reasonable, and not
+something this session needed to build.
+
+**Tested standalone** (not yet inside a rebuilt container): ran the
+capture loop directly against the aarch64 host's real shell environment
+— 83 of 166 total variables passed the exclusion filter; confirmed by
+name that `PATH`, `HOME`, `USER`, `SSH_AUTH_SOCK`, `XDG_RUNTIME_DIR`, and
+`TERM` are all correctly absent from the captured set. Not yet verified
+end-to-end against a live rebuild on this port; pending Josiah's
+rebuild.
