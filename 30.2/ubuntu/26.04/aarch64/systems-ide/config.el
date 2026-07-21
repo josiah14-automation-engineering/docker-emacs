@@ -64,6 +64,9 @@
 ;; Wrap completion candidates — bottom candidate cycles back to top and vice versa.
 (setq vertico-cycle t)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; LSP adjustments
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (after! lsp-mode
   (setq lsp-modeline-code-action-fallback-icon
         (nerd-icons-codicon "nf-cod-lightbulb"))
@@ -75,9 +78,36 @@
   ;; the guessed root avoids the prompt entirely.
   (setq lsp-auto-guess-root t))
 
+;; Doom prepends `project-projectile' ahead of project.el's own VC backend
+;; in `project-find-functions', so it's Projectile's root-finding, not
+;; project.el's, that governs LSP workspace-root detection (via
+;; `lsp-auto-guess-root' above) and everything else that calls
+;; `project-current'/`projectile-project-root'.
+;; `projectile-project-root-files-bottom-up' -- the marker list that
+;; correctly handles a project nested inside a bigger VCS tree, by
+;; returning the *closest* match rather than the outermost -- only has
+;; VCS markers by default, missing every one of this project's own "full
+;; support" tier build-system files. Any of this repo's own flight-test
+;; fixtures (nested inside this repo's own git tree, by construction)
+;; resolved to the outer repo root instead of their own project root:
+;; rust-analyzer/gopls/clangd all initialized against the wrong
+;; workspace, silently unable to find Cargo.toml/go.mod/CMakeLists.txt.
+;; Same root cause already fixed for the debugger side of Rust/Go/C (see
+;; dape-config.el's +dape-resolve-cwd/+dape-go-root and DECISIONLOG.md)
+;; -- this is the LSP-side half of the same bug, caught later because
+;; dape's debugger configs already bypass project/projectile entirely,
+;; while LSP root-guessing has no such bypass and goes straight through
+;; this list. Verified live against all three fixtures after adding
+;; these: workspace root correctly resolves to the nested project
+;; directory, not the repo root.
+(after! projectile
+  (dolist (marker '("Cargo.toml" "go.mod" "CMakeLists.txt"))
+    (add-to-list 'projectile-project-root-files-bottom-up marker)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; load language configs and keybindings
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(load! "all-lisps-config")
 (load! "go-config")
 (load! "shell-config")
 (load! "bats-config")
@@ -87,6 +117,7 @@
 (load! "python-config")
 (load! "ruby-config")
 (load! "global-keybindings")
+(load! "polyglot-keybindings")
 (load! "sh-keybindings")
 (load! "go-keybindings")
 (load! "nix-keybindings")

@@ -479,3 +479,123 @@ relative to each other.
 **Revisit if:** Ruby glue-script debugging needs ever actually come up in
 practice, or `debug.rb`'s own DAP server mode (bundled with Ruby 3.1+)
 becomes worth wiring in as a structured alternative to pry.
+
+---
+
+## LSP workspace-root detection: teach Projectile about this project's own build-system markers
+
+**Date:** 2026-07-21
+**Status:** Active
+
+**Decision:** Add `Cargo.toml`, `go.mod`, and `CMakeLists.txt` to
+`projectile-project-root-files-bottom-up` in `config.el` (a new
+`(after! projectile ...)` block, grouped under a new "LSP adjustments"
+section header alongside the pre-existing `(after! lsp-mode ...)`
+block).
+
+**Rationale:** `lsp-auto-guess-root` (already `t`, see the entry above)
+resolves the workspace root via `projectile-project-root` -- and
+Projectile's own bottom-up marker list, which correctly handles a
+project nested inside a bigger VCS tree by returning the closest match,
+ships with only version-control markers by default. Every "full
+support" tier flight-test fixture in this repo (all nested inside this
+repo's own git tree, by construction) resolved to the outer repo root
+instead of their own project directory: rust-analyzer, gopls, and
+clangd all silently initialized against the wrong workspace. Same root
+cause as the debugger-side command-cwd bug fixed earlier tonight (see
+"Fix the same command-cwd bug for gdb/lldb-dap/lldb-vscode, not just
+dlv" and the Go/dlv entry before it) -- this is the LSP-side half of the
+identical underlying issue, caught later specifically because dape's
+debugger configs already bypass project/projectile entirely for their
+own `:program`/`command-cwd` resolution, while LSP root-guessing goes
+straight through Projectile with no such bypass.
+
+**A real tradeoff, considered and accepted rather than assumed away:**
+bottom-up search returns the *closest* marker match. A genuine
+multi-module CMake project (umbrella `CMakeLists.txt` with
+`add_subdirectory()` subprojects, each with their own nested
+`CMakeLists.txt`) would resolve to the innermost subdirectory instead of
+the umbrella root. The alternative --
+`projectile-project-root-files-top-down-recurring` (returns the
+*outermost* match, already used for `compile_commands.json`/`Makefile`)
+-- was considered and rejected: it trades this failure mode for the
+opposite one, incorrectly swallowing a genuinely separate, accidentally-
+nested unrelated project into a larger one. Rust and Go are considerably
+less exposed to this in practice than C/CMake -- rust-analyzer and gopls
+both self-discover their true workspace root from workspace-aware
+manifests (`Cargo.toml`'s `[workspace]`, `go.work`) once pointed at any
+member, independent of what directory `lsp-mode` initially guessed;
+clangd's own `compile_commands.json` discovery walks up from the source
+file independently of the LSP-reported root, which may make it more
+tolerant of this than expected, but this specific claim wasn't verified
+live against a real multi-module CMake project. Likelihood assessed as
+low for this project specifically: none of the current flight-test
+fixtures have this shape.
+
+**Cross-util jump-to-def (a related but separate concern):** for a
+future repo containing several small language-specific utils that
+cross-reference each other (e.g. one C utility linking against
+another), this fix only governs the automatic, zero-effort root guess
+-- it doesn't preclude explicitly telling lsp-mode about a broader
+scope. Rust/Go both have native, purpose-built answers independent of
+this heuristic entirely (Cargo workspace members, `go.work`). C/CMake
+has no equivalent workspace manifest; the answer there is either one
+umbrella `CMakeLists.txt` with `add_subdirectory()` (one build, one
+`compile_commands.json`, one clangd session automatically), or manually
+calling `lsp-workspace-folders-add` to add a second directory into the
+same clangd session -- a normal, supported multi-root workflow already
+built into lsp-mode, not something needing new configuration here.
+
+**How to manually override the guessed root:** `lsp-auto-guess-root`
+being globally `t` short-circuits `lsp-mode`'s own interactive root
+picker (`lsp--find-root-interactively`) -- confirmed by reading
+`lsp--calculate-root`'s `or` chain, which tries
+`lsp--suggest-project-root` first and only reaches the interactive
+prompt when auto-guess is off. `M-: (setq-local lsp-auto-guess-root
+nil)` in the buffer in question, then `M-x lsp`, reaches the real
+prompt (import suggested root / select root directory interactively /
+import at current directory / blocklist) -- buffer-locally, without
+touching the global setting the daemon/smoketest flow depends on.
+
+**Follow-up decision, same session:** wrapped the recipe above into two
+real commands (`lsp-pick-root`, `lsp-restore-auto-guess-root`) in a new
+`polyglot-keybindings.el` -- a new category of file, distinct from both
+`global-keybindings.el` (purely editor-level) and each language's own
+`<lang>-keybindings.el`: cross-cutting development-tooling concerns that
+show up across multiple languages' LSP/project setups but aren't
+specific to any one of them. `SPC c l w S` for the picker. Considered
+having `lsp-pick-root` write a `.dir-locals.el` itself (verified live
+that setting `lsp-auto-guess-root` to `nil` per-project via
+`.dir-locals.el` correctly makes every subsequent file resolve to the
+already-picked root automatically) -- deferred, not yet built.
+
+**A related decision found along the way:** Doom's `map!` has no
+`(declare (indent N))`, and `:prefix' isn't a real special form, so
+nested `:prefix` forms indent with cascading offsets by default. Fixed
+globally via `(put ':prefix 'lisp-indent-function 1)` in a new
+`all-lisps-config.el` (distinct from `config.el`'s per-language files --
+scoped to Lisp-editing behavior that should apply across every Lisp
+dialect this setup touches, not one language's toolchain). Numeric `1`
+chosen over `'defun` after testing both live: both give the same clean,
+non-cascading per-level nesting step, but only `1` also lines up a
+form's own body with its one positional argument (e.g. `:desc` aligning
+with `:prefix` in `(:prefix "w" :desc ...)`). Confirmed this property is
+process-wide, affecting `lisp-mode`/`scheme-mode` too, not just
+`emacs-lisp-mode` -- accepted given `:prefix`-as-list-head is a
+distinctly Doom/Emacs-Lisp DSL pattern, unlikely to collide with
+idiomatic Common Lisp/Scheme/Racket code, relevant given Guile/SBCL/
+Racket/scsh/rash support under consideration. A genuine per-project
+override remains possible without touching this global property:
+`calculate-lisp-indent` reads it through an ordinary, buffer-local-able
+`defcustom` also named `lisp-indent-function` (confusingly, the same
+name as the property) -- a project's own `.dir-locals.el` can rebind
+that variable instead, the same way `lsp-auto-guess-root` already does.
+
+**Verified live:** rust-analyzer/gopls/clangd all correctly resolve to
+their own flight-test subdirectory (not the repo root) after the fix,
+against this repo's own nested copies. Only verified on aarch64 so far.
+
+**Revisit if:** a real multi-module CMake project (or Cargo/Go workspace
+with the same nested-manifest shape) is ever opened in one of these
+containers and the closest-match behavior turns out to be wrong for it
+in practice.

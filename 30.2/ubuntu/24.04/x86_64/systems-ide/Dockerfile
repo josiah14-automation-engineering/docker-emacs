@@ -572,6 +572,7 @@ COPY --chown=${USERNAME}:${USERNAME} typescript-keybindings.el /home/${USERNAME}
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el    /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.config/doom/bats-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} bats-config.el        /home/${USERNAME}/.config/doom/bats-config.el
+COPY --chown=${USERNAME}:${USERNAME} all-lisps-config.el   /home/${USERNAME}/.config/doom/all-lisps-config.el
 COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.config/doom/guile-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
@@ -579,6 +580,7 @@ COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} nu-config.el          /home/${USERNAME}/.config/doom/nu-config.el
 COPY --chown=${USERNAME}:${USERNAME} dape-config.el        /home/${USERNAME}/.config/doom/dape-config.el
 COPY --chown=${USERNAME}:${USERNAME} global-keybindings.el /home/${USERNAME}/.config/doom/global-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} polyglot-keybindings.el /home/${USERNAME}/.config/doom/polyglot-keybindings.el
 
 RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \
     && sed -i "s/<email-address>/\"${EMAIL}\"/" /home/${USERNAME}/.config/doom/config.el \
