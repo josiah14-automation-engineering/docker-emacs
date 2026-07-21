@@ -13,7 +13,8 @@
 ;; for that part.
 ;;
 ;; LOCAL-LEADER — this file's own bindings (SPC m ...):
-;;   b c   configure       (+cmake/configure, via `cmake -B build -S .')
+;;   b c   configure       (+cmake/configure, via `cmake -B build -S .
+;;                          -DCMAKE_BUILD_TYPE=Debug')
 ;;   b b   build           (+cmake/build, via `cmake --build build')
 ;;   b r   rebuild (clean) (+cmake/rebuild, via `cmake --build build --clean-first')
 ;;   b d   delete build/   (+cmake/clean, via `rm -rf build')
@@ -43,10 +44,16 @@ none is found (shouldn't happen from a cmake-mode buffer)."
     root))
 
 (defun +cmake/configure ()
-  "Configure the current CMake project into ./build."
+  "Configure the current CMake project into ./build.
+Defaults to `-DCMAKE_BUILD_TYPE=Debug' -- CMake passes neither `-g' nor
+`-O2' with no build type set at all, so an unconfigured project silently
+compiles with zero DWARF debug info. Not a debugger/dape bug: gdb/lldb
+have nothing to break on regardless of how correctly they're wired.
+Confirmed live against flight-tests/c -- `objdump --dwarf=info' on a
+build produced by the old bare `cmake -B build -S .' came back empty."
   (interactive)
   (let ((default-directory (+cmake--root)))
-    (compile "cmake -B build -S .")))
+    (compile "cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug")))
 
 (defun +cmake/build ()
   "Build the current CMake project from ./build."

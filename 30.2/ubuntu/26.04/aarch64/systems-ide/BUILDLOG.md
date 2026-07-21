@@ -1864,3 +1864,76 @@ file's own account above). Still not yet done: none of this has been
 tested on x86_64 (aarch64-only so far, same caveat as the rest of this
 debugging saga).
 
+#### C/gdb debugging validated live — and a real, IDE-wide gap found along the way
+
+Circled back to confirm the one thing the original C/CMake entry (and its
+debugger follow-up) had explicitly flagged as unverified: an actual live
+gdb debug session against the C flight-test project. Set a breakpoint,
+launched via the real `SPC d d` -> dape -> gdb flow -- and the program ran
+straight through, ignoring it, same outward symptom as the lldb-dap race
+condition above.
+
+**Not the same bug.** `objdump --dwarf=info` on the flight-test's compiled
+binary came back completely empty -- zero DWARF debug info. Its
+`CMakeLists.txt` sets no `CMAKE_BUILD_TYPE`, and CMake's default with
+nothing specified passes neither `-g` nor `-O2` at all. gdb had nothing to
+break on, correctly wired or not -- not a launch-ordering race, not a
+container issue, just an ordinary unconfigured build.
+
+**The bigger finding**: this project's own `+cmake/configure` binding
+(`SPC m b c`, `cmake-keybindings.el`) ran the identical bare
+`cmake -B build -S .` with no build-type flag -- meaning every C/C++
+project debugged via this IDE's own recommended default workflow would
+hit the same silent "breakpoints never work" wall, not just this one
+fixture. Fixed by adding `-DCMAKE_BUILD_TYPE=Debug` to `+cmake/configure`
+itself, so debug builds are the default rather than something a user has
+to know to ask for.
+
+**Verified live**: rebuilt the flight-test with the fixed configure
+command, confirmed `.debug_info` now present, cleared stale breakpoints
+left over from the same day's Rust testing (a mix of `.c` and `.rs`
+breakpoints had accumulated in the same live session), set one fresh
+breakpoint, launched -- correct stop at `main.c:6`, locals populated
+(`unused 42`, `g` present). Applied to both trees.
+
+#### Field notes from actually driving the C debugger, same session
+
+Three smaller things surfaced while using the now-working debugger for
+real, past the initial "does it stop at a breakpoint" check -- none of
+them bugs in this project's own config, all worth having on record.
+
+**`SPC d d` doesn't know which debugger a language "should" use.** In a
+`c-mode` buffer, the prompt came back pre-filled with `lldb-dap`, not
+`gdb` -- confirmed via `dape-history`, which held exactly `("lldb-dap")`
+from the same day's earlier Rust testing. `dape--read-config` (read
+directly from `dape.el`) prefers the most recent history entry that's
+still valid for the *current* buffer's mode over any notion of "the
+right debugger for this language" -- and since `lldb-dap`'s `modes` list
+deliberately still includes `c-mode`/`c++-mode` (see the earlier
+DECISIONLOG.md entries), a Rust-session choice is a legitimate, silently
+pre-filled suggestion in a C buffer too. Not a bug -- both configs are
+genuinely valid for C -- but a real trap for muscle memory: accepting the
+prompt without reading it gets you the wrong debugger for what's actually
+tested here. No code fix; just something worth knowing.
+
+**Live variable editing works as expected.** Confirmed `dape-info-variable-edit`
+(bound to `=` in the Scope buffer's own line-local keymap, not a global
+`SPC d` binding) against a paused C session -- expanded a struct with `e`
+(`dape-info-scope-toggle`), edited two of its fields by hand mid-pause,
+continued execution, and the edited values were what the next function
+call actually used. First real exercise of this feature in this project.
+
+**Paused-program stdout can be invisible without being lost.** The
+flight-test's `print_greeting` uses a bare `printf`, no `fflush`, no
+`setvbuf` -- confirmed by reading `greet.c` directly. Standard C behavior:
+stdout auto-switches from line-buffered to fully-buffered the moment it's
+not attached to a real terminal, which a DAP-captured subprocess's output
+always is. Stepping past the `printf` call didn't show anything in
+`*dape-repl*` because the write was sitting in the C runtime's own
+internal buffer, not because the debugger failed to capture it -- it
+shows up on program exit, or on demand by sending `` call fflush(stdout)``
+directly to the paused process via the REPL (per its own welcome message:
+"input starting with a space is sent directly to the debugger"). Not a
+bug anywhere in this stack; a general, easy-to-forget consequence of how
+piped stdout behaves, worth remembering for any future language's own
+debugger validation pass.

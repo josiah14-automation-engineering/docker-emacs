@@ -2174,3 +2174,48 @@ original entry, just resolved in the opposite direction. Both fixes are
 generic enough (an env var; a standard lldb-dap DAP argument) that they
 should hold here too, but that's an expectation, not a confirmed result.
 
+#### C/gdb debugging validated live — and a real, IDE-wide gap found along the way
+
+Found and fixed entirely on the aarch64 tree; see that tree's BUILDLOG.md
+entry of the same title for the full account. Short version: circling
+back to confirm the one thing the original C/CMake entry (and its
+debugger follow-up) had explicitly flagged as unverified — an actual live
+gdb debug session — a breakpoint got silently ignored, same outward
+symptom as the lldb-dap race condition elsewhere in this log but a
+different, much more mundane cause: the flight-test's `CMakeLists.txt`
+sets no `CMAKE_BUILD_TYPE`, so the compiled binary had zero DWARF debug
+info (`objdump --dwarf=info` came back empty) — nothing for gdb to break
+on, correctly wired or not.
+
+The bigger finding: this project's own `+cmake/configure` binding
+(`SPC m b c`) ran the identical bare `cmake -B build -S .` with no
+build-type flag, meaning every C/C++ project configured through the
+IDE's own recommended default workflow would hit the same silent
+"breakpoints never work" wall. Fixed by adding
+`-DCMAKE_BUILD_TYPE=Debug` to `+cmake/configure` itself. Verified live on
+aarch64: rebuilt, confirmed debug info present, set a fresh breakpoint,
+correct stop with populated locals. `cmake-keybindings.el`'s code change
+is mirrored here; this specific validation (the live gdb session, the
+debug-info check) has not been independently repeated on x86_64.
+
+#### Field notes from actually driving the C debugger, same session
+
+Mirrored from the aarch64 tree's entry of the same title — three smaller,
+non-bug findings from using the now-working debugger for real, worth
+having on record here too since none of them are aarch64-specific:
+
+- `SPC d d` pre-fills from `dape-history`'s most recent entry that's
+  still valid for the current buffer's mode, not "the right debugger for
+  this language" — a Rust session's `lldb-dap` choice is a legitimate,
+  silently pre-filled suggestion in a `c-mode` buffer too, since
+  `lldb-dap`'s `modes` list deliberately still includes `c-mode`/
+  `c++-mode`. Read the prompt before accepting it.
+- Live variable editing (`=` in the Scope buffer, `dape-info-variable-edit`)
+  works as expected — confirmed against a paused C session, editing a
+  struct field mid-pause and continuing to see the edited value actually
+  used.
+- A paused program's `printf` output can be invisible without being
+  lost — stdout auto-switches to fully-buffered the moment it's not a
+  real terminal, which DAP-captured output always is. Not a bug; shows up
+  on exit, or on demand via `` call fflush(stdout)`` sent directly to the
+  REPL.
