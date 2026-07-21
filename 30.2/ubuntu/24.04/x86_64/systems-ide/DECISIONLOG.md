@@ -370,3 +370,112 @@ and fixed there, at which point `:stopOnEntry` could potentially come
 back out; a cleaner workaround is found that doesn't require the extra
 `SPC d c`; or this x86_64 tree gets independently tested and the picture
 turns out to differ.
+
+---
+
+## Lua debugging: local-lua-debugger-vscode over actboy168/lua-debug
+
+**Date:** 2026-07-21
+**Status:** Active
+
+**Decision:** Use `tomblind/local-lua-debugger-vscode` as Lua's DAP debugger,
+wired directly into `dape-configs` as a new `lua-local` entry in
+`dape-config.el` (no dape built-in Lua config exists, unlike gdb/lldb-dap/
+dlv/debugpy).
+
+**Rationale:** `actboy168/lua-debug` is the more capable, more widely-used
+option (proper coroutine support, broader Lua version coverage, used by
+several Neovim `nvim-dap-lua` configs) but was rejected on distribution
+grounds: its GitHub Releases page has been empty since 2019 (no prebuilt
+binaries at all), and building it from source requires its own custom
+`luamake` toolchain plus submodule dependencies -- the same shape of
+fragile, hard-to-reproduce build this project has explicitly avoided
+elsewhere (the CMake-language-server Python-version saga is the clearest
+prior example). `local-lua-debugger-vscode` is pure TypeScript/Node with
+exactly one runtime dependency (`vscode-debugadapter`) and builds with a
+plain `npm install && npm run build` -- a normal, boring, reproducible
+build, not a toolchain fight. Its one real limitation (no attach-to-
+running-process support, launch only) doesn't matter for a personal dev
+container where the launch is always under your own control anyway.
+
+**How it works:** its debug adapter (`extension/debugAdapter.js`) is a
+plain stdio DAP server, same shape as gdb/lldb-dap -- no socket/port
+needed. Two things a normal VS Code install would inject automatically
+and silently had to be supplied by hand: an explicit `:extensionPath`
+launch argument (without it, the Lua-side `require('lldebugger')` fails
+looking for `"undefined/debugger/lldebugger.lua"`), and its own nested
+`:program` plist shape (`:lua`/`:file`, not a bare string). `+dape-lua-file`/
+`+dape-lua-cwd` in `dape-config.el` use `buffer-file-name` directly rather
+than dape's own project-root machinery (already known broken for nested
+fixtures, see the Go/Rust/C entries above) or a marker-file walk -- a
+debugged Lua script rarely has a project manifest to anchor one on in the
+first place.
+
+**Verified live:** breakpoint in the `for` loop of
+`flight-tests/lua/init.lua`, correct stop, `name`/`value`/`hello_str`/
+`options`/`utils` all populated in Scope, clean continue to completion.
+
+**Revisit if:** `actboy168/lua-debug` ever ships real prebuilt release
+binaries again, or coroutine-heavy debugging becomes something this tier
+actually needs (out of scope for glue-script-adjacent Lua use so far).
+
+---
+
+## Python gets a real debugger; Ruby stays without one
+
+**Date:** 2026-07-21
+**Status:** Active
+
+**Decision:** Install `python3-debugpy` via apt (not pip) for Python's
+glue-script tier, giving it a working `SPC d d` via dape's already-built-in
+`debugpy`/`debugpy-module` configs. Do not add an equivalent for Ruby.
+
+**Rationale:** Both languages sit in the same glue-script tier (LSP on,
+project tooling off, see "Python, Ruby, and JavaScript added as a
+glue-script tier" in BUILDLOG.md) -- but lived experience with each
+differs enough to justify treating their debugger needs differently
+rather than applying the same rule uniformly. Python glue scripts here
+tend to be larger and more failure-prone in practice (real deploy/task
+scripts, not one-liners) -- exactly the kind of thing where a real,
+structured debugger (breakpoints, scope inspection, step execution) pays
+for itself. Ruby glue scripts (Chef-style) haven't shown the same need in
+practice -- and Ruby already has a perfectly serviceable, zero-extra-
+dependency answer if one ever comes up: `binding.pry`, run through Doom's
+existing `inf-ruby` REPL integration (already wired for plain `irb`; pry
+is a drop-in replacement speaking the same comint protocol). That's a
+REPL-driven debugging session, not a structured dape one -- deliberately
+a different, lighter-weight shape than what Python is getting here, not a
+worse version of the same thing.
+
+`python3-debugpy` was chosen over `pip install debugpy` specifically to
+keep the "no pip/poetry/conda" rule for this tier intact (see the
+Dockerfile's glue-script-tier comment) -- Ubuntu's `universe` repo
+packages it as an `Architecture: all` package (pure Python, no per-arch
+build needed), so apt covers it exactly the way ruff/pyright/ruby-lsp
+already cover everything else in this tier, without an exception to the
+tier's own stated philosophy.
+
+**A real gap found along the way:** this image ships only a versioned
+`python3`, no bare `python` -- and dape's built-in `debugpy` config
+hardcodes `command "python"`. Without a symlink, the adapter simply
+isn't found. Fixed the same way the identical `lua`/`lua5.4` gap was
+fixed for Lua: `ln -s /usr/bin/python3 ~/.local/bin/python`.
+
+**Verified live:** breakpoint inside `main()` in
+`flight-tests/python/deploy.py`, correct stop, clean continue through
+`import tasks`/the rest of the script to a clean exit. Also noted for the
+record (technically present, not actually harmful): dape's built-in
+`debugpy`/`debugpy-module` configs resolve `:program`/`:cwd` via
+`dape-buffer-default`/`dape-cwd`, which -- like gdb/lldb-dap/dlv before
+the earlier command-cwd fixes -- ultimately call the same broken
+`project-current` chain for a project nested inside this repo's own git
+tree. Unlike those three, this turns out to be harmless here: both
+`:program` and `:cwd` derive from the exact same (wrong, but internally
+consistent) root value, so the relative path and the working directory
+still combine to the correct absolute file. No fix applied; flagged here
+in case a future dape/debugpy version changes how these are computed
+relative to each other.
+
+**Revisit if:** Ruby glue-script debugging needs ever actually come up in
+practice, or `debug.rb`'s own DAP server mode (bundled with Ruby 3.1+)
+becomes worth wiring in as a structured alternative to pry.

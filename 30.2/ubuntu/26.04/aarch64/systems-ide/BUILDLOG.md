@@ -2066,3 +2066,37 @@ Only verified on aarch64 so far; x86_64 mirrors the same fix but hasn't
 been independently confirmed against its own rebuilt image. Same
 not-yet-rebuilt caveat as the entry above -- this was verified via
 `load-file` into the running daemon, not a fresh container boot.
+
+---
+
+#### Python gets a real debugger
+
+`python3-debugpy` added via apt (not pip -- keeps this tier's "no pip/
+poetry/conda" rule intact; it's an `Architecture: all` package in
+Ubuntu's universe repo, no per-arch build needed). dape already has a
+built-in `debugpy`/`debugpy-module` config, so no new dape-config.el
+entry was needed the way Lua required one. One real gap found and fixed:
+this image ships only a versioned `python3`, no bare `python`, and
+dape's built-in config hardcodes `command "python"` -- same shape of gap
+`lua5.4`/`lua` needed fixing for Lua, fixed the same way (a symlink under
+`~/.local/bin`).
+
+Ruby deliberately does not get an equivalent -- see DECISIONLOG.md for
+the full reasoning (pry through the existing `inf-ruby` REPL integration
+already covers that need there, and Python's glue scripts have shown
+more real debugging need in practice than Ruby's have).
+
+Verified live: breakpoint inside `main()` in `flight-tests/python/
+deploy.py`, correct stop, clean continue through `import tasks` to exit.
+`debugpy` itself couldn't be installed via apt in the already-running
+container (no network access at runtime, by design -- confirmed the hard
+way when a live `apt-get update` attempt hung on DNS resolution, same
+failure mode as the earlier lldb-dap DEBUGINFOD_URLS hang). Verified
+instead by vendoring the actual `.deb`'s Python package files in from a
+disposable `docker run ubuntu:26.04` container (which does have build-
+time network access) directly into the running container's
+`dist-packages`, purely for this test -- the real install path (baked in
+at image build time, via apt) is untouched and unaffected by this.
+
+Only verified on aarch64 so far; x86_64 mirrors the same fix but hasn't
+been independently confirmed against its own rebuilt image.

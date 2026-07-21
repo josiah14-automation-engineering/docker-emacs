@@ -5,3 +5,4 @@ host/
 **/flight-tests/*/build/
 **/flight-tests/*/.cache/
 **/flight-tests/*/target/
+**/flight-tests/*/__pycache__/

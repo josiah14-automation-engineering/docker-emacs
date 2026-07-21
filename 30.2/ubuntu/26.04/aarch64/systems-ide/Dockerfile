@@ -231,8 +231,15 @@ RUN apt-get update -y && \
       `# bootstrap hard-requires the \`bundle\` executable regardless of` \
       `# project structure (see the comment above the bundler RUN step).` \
       `# libyaml-dev is psych's (a transitive ruby-lsp dependency) native-` \
-      `# extension build requirement for that same bootstrap.` \
+      `# extension build requirement for that same bootstrap. python3-` \
+      `# debugpy is Python's own real debugger (dape has a built-in DAP` \
+      `# config for it already) -- unlike the rest of this tier, worth the` \
+      `# exception given how much glue-script Python actually gets used` \
+      `# for; still via apt (not pip), still no per-project anything.` \
+      `# Ruby stays without one -- pry covers that need well enough there` \
+      `# (see DECISIONLOG.md).` \
       python3 \
+      python3-debugpy \
       ruby \
       ruby-dev \
       libyaml-dev \
@@ -461,6 +468,14 @@ RUN mkdir -p /home/${USERNAME}/.config/nushell/nupm \
 # on PATH (see the ENV PATH line above), so no new PATH entry is needed.
 RUN mkdir -p /home/${USERNAME}/.local/bin \
     && ln -s /usr/bin/lua5.4 /home/${USERNAME}/.local/bin/lua
+
+# Same gap, same fix, for Python: this image only ships a versioned
+# `python3` (Ubuntu deliberately provides no bare `python`, same
+# reasoning as `lua5.4` above). dape's built-in debugpy config hardcodes
+# `command "python"` for launching `python -m debugpy.adapter` -- with
+# no symlink, that command is simply not found and the debugger never
+# starts.
+RUN ln -s /usr/bin/python3 /home/${USERNAME}/.local/bin/python
 
 # lua-language-server ships as a self-contained directory tree (bin/,
 # locale/, main.lua, ...), not a single relocatable binary -- the archive
