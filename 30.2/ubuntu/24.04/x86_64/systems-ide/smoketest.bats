@@ -1,6 +1,7 @@
 #!/usr/bin/env bats
 
-# IDE smoketest for systems-ide (Shell + Go + Nix + Bats + Nushell + C/C++/CMake).
+# IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Bats + Nushell +
+# C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript glue-script tier).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -12,14 +13,20 @@
 #
 # Run via: bats smoketest.bats
 # bash-language-server, shellcheck, zshdb, go, gopls, dlv, golangci-lint, bats,
-# nu, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan are
-# all baked into the image at build time (no network/host bind mounts
-# required). nu and clangd both double as their own LSP server, no separate
-# language-server package needed for either. ccls is deliberately not
-# installed (see Dockerfile) -- Doom's own :lang cc module already
-# deprioritizes it below clangd. The nix CLI itself is checked separately in
-# nix-smoketest.bats, since it depends on host bind mounts (see run.sh) not
-# present here.
+# nu, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
+# lua-language-server, stylua, python3, pyright, ruff, ruby, ruby-lsp,
+# rubocop, typescript-language-server, prettier, oxlint, cargo, rustc,
+# rust-analyzer, rustfmt, clippy, lldb are all baked into the image at
+# build time (no network/host bind mounts required). nu and
+# clangd both double as their own LSP server, no separate language-server
+# package needed for either. ccls is deliberately not installed (see
+# Dockerfile) -- Doom's own :lang cc module already deprioritizes it below
+# clangd. eslint and solargraph are likewise deliberately not installed --
+# oxlint and ruby-lsp are this project's chosen tools for those roles (see
+# javascript-keybindings.el/ruby-keybindings.el). The nix CLI itself is
+# checked separately in nix-smoketest.bats, since it depends on host bind
+# mounts (see
+# run.sh) not present here.
 
 setup_file() {
   mkdir -p /tmp/smoketest
@@ -44,6 +51,10 @@ EOF
 console.log("hi");
 EOF
   cat > /tmp/smoketest/test.ts <<'EOF'
+const message: string = "hi";
+console.log(message);
+EOF
+  cat > /tmp/smoketest/test.zsh <<'EOF'
 #!/bin/zsh
 echo hi
 EOF
@@ -51,6 +62,11 @@ EOF
 package main
 
 func main() {}
+EOF
+  cat > /tmp/smoketest/test.rs <<'EOF'
+fn main() {
+    println!("hi");
+}
 EOF
   cat > /tmp/smoketest/test.nix <<'EOF'
 { }
@@ -316,6 +332,23 @@ eval_elisp() {
   [[ "$output" =~ "(t t)" ]]
 }
 
+@test "opening a .rs file activates rustic-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.rs") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "rustic-mode" ]]
+}
+
+@test "rust-analyzer connects for rustic-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.rs")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "rust-analyzer" ]]
+}
+
 @test "opening a .nix file activates nix-mode" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.nix") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
@@ -505,6 +538,13 @@ eval_elisp() {
   [[ "$output" =~ "c++-mode" ]]
 }
 
+@test "dape's built-in lldb-dap debug config covers rustic-mode (:tools debugger)" {
+  run eval_elisp '(progn (require (quote dape)) (let ((modes (plist-get (alist-get (quote lldb-dap) dape-configs) (quote modes)))) (list (memq (quote rustic-mode) modes) (memq (quote rust-mode) modes))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "rustic-mode" ]]
+  [[ "$output" =~ "rust-mode" ]]
+}
+
 @test "global debugger keybinding SPC d d resolves to dape (config/default +bindings)" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC d d")))'
   [ "$status" -eq 0 ]
@@ -539,6 +579,12 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.go") (list (key-binding (kbd "SPC m e")) (key-binding (kbd "SPC m I"))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(+go/playground-yank go-import-add)" ]]
+}
+
+@test "rust localleader keybindings resolve (cargo build/run/test, format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.rs") (list (key-binding (kbd "SPC m b b")) (key-binding (kbd "SPC m b r")) (key-binding (kbd "SPC m t a")) (key-binding (kbd "SPC m f"))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(rustic-cargo-build rustic-cargo-run rustic-cargo-test apheleia-format-buffer)" ]]
 }
 
 @test "nix localleader keybindings resolve (format, update fetch)" {

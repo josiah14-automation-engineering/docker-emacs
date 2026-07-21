@@ -36,6 +36,9 @@ ARG STYLUA_VERSION=2.5.2
 ARG STYLUA_SHA256=0ef2ebf0b7e5a652b65c4cb96c6d9ffb3981a98547de3c764465bbf54a8d761a
 ARG VCPKG_VERSION=2026.06.24
 ARG NUPM_COMMIT=9a28419bf91aadc58999d83e0f6ef8d9dbfa7d9f
+ARG RUFF_VERSION=0.15.22
+ARG RUFF_SHA256=54ec426d839d7cea1096e9ea1c5486fd2f3df62ee6cfd71dc090b18f99bebd90
+ARG RUST_VERSION=1.97.1
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -201,7 +204,11 @@ RUN apt-get update -y && \
       `# avoids duplicating potentially many-GB image/container state.` \
       docker.io \
       podman \
-      `# --- lua ide ---` \
+      `# --- rust ide ---` \
+      `# Just the debugger here -- rest of the toolchain comes from rustup` \
+      `# below, pinned, not apt. Plain lldb package already ships` \
+      `# /usr/bin/lldb-dap, which dape has a built-in rust-mode config for.` \
+      lldb \
       `# lua-language-server and stylua are prebuilt release binaries,` \
       `# installed below -- only the interpreter itself comes from apt.` \
       lua5.4 \
@@ -474,6 +481,17 @@ RUN curl -fsSL "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSI
 # pyproject.toml/ruff.toml still takes precedence automatically. See
 # ruff-pyproject.toml's own header comment for the exact mechanism.
 COPY --chown=${USERNAME}:${USERNAME} ruff-pyproject.toml /home/${USERNAME}/.config/ruff/pyproject.toml
+
+# Rust gets full IDE support, same presumption as Go: real projects, not
+# glue scripts. rustup (not apt) pins the toolchain to one exact version;
+# rust-analyzer/rustfmt/clippy are rustup components, landing alongside
+# cargo/rustc in ~/.cargo/bin. cargo-audit/cargo-outdated deliberately
+# skipped -- optional subcommands, not part of the LSP+debugger promise.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path \
+    && /home/${USERNAME}/.cargo/bin/rustup component add rust-analyzer rust-src rustfmt clippy
+ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
+
 
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 

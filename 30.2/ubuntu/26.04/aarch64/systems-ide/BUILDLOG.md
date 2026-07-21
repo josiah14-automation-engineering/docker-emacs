@@ -1417,3 +1417,105 @@ standard practice going forward. Not yet verified end-to-end against a
 live rebuild; pending Josiah's build (in progress as this entry is being
 written — x86_64 mirror to follow while aarch64 builds).
 
+#### Rust added as an eighth full-support language
+
+Rust gets full IDE support (LSP + debugger), the same presumption already
+made for Go, C/C++, Nix, Shell, Bats, Nushell, and Lua — not the
+glue-script tier Python/Ruby/JavaScript/TypeScript get. `(rust +lsp)`
+added to `init.el`.
+
+**Toolchain**: rustup, not apt — pinned to `1.97.1` (checked live against
+`https://static.rust-lang.org/dist/channel-rust-stable.toml` at write
+time rather than assumed), `--profile minimal --no-modify-path` since
+PATH is managed via Docker `ENV`, not shell rc files. `rust-analyzer`,
+`rustfmt`, `clippy` are rustup *components*, not separate installs — they
+land as proxy shims alongside `cargo`/`rustc` in `~/.cargo/bin`, so one
+PATH entry covers the whole toolchain. Installed post-`USER` switch
+(matches the ruff/stylua/vcpkg precedent — rustup's own design is a
+per-user install, `~/.cargo`/`~/.rustup`, not a system-wide one like Go's
+`/usr/local/go`).
+
+**Major mode**: `.rs` files use `rustic-mode` (from the `rustic` package,
+which Doom's `:lang rust +lsp` module pulls in for its cargo
+integration), not plain `rust-mode` — confirmed by fetching Doom's own
+`modules/lang/rust/config.el`/`packages.el` at this image's pinned
+`DOOM_COMMIT` rather than assumed from current upstream (which has since
+restructured its repos entirely — `doomemacs/doomemacs` 404s now,
+redirects to `doomemacs/core`, and `:lang` modules moved out of the
+monorepo; had to fetch `contents/modules/lang/rust?ref=<pinned-commit>`
+specifically to see what this image's actual pinned Doom version ships).
+
+**Keybindings — much thinner than go-keybindings.el, on purpose**:
+Doom's own rust module already wires an extensive `rustic-mode-map`
+localleader map directly in its package `:config` block (`SPC m b`
+prefix: audit/build/bench/check/clippy/doc/doc-open/fmt/new/outdated/run;
+`SPC m t a`/`SPC m t t` for cargo test) — go-keybindings.el had to hand-
+build the equivalent because Go's own module leaves more to custom
+REPL/playground glue. `rust-keybindings.el` only adds one binding, bare
+`SPC m f` → `apheleia-format-buffer`, purely for cross-language muscle-
+memory consistency with every other language here (Doom's own module
+binds format to `SPC m b f` instead, reaching the same `rustfmt` via
+`cargo fmt` rather than apheleia — not a gap, just a different key).
+Wrapped in `after! rustic-mode` per the go-mode/nix-mode race-condition
+fix already established this project (rustic's own bindings load lazily
+on first `.rs` visit via its package `:config` block; an unwrapped `map!`
+here would run at Doom config-load time instead, before that).
+
+**Formatting**: apheleia's own default `apheleia-mode-alist` already
+maps both `rustic-mode` and `rust-mode` to `rustfmt` — confirmed directly
+against `apheleia-formatters.el` upstream rather than assumed (this is
+exactly the kind of default that turned out to be *missing* for
+`typescript-mode` earlier this session, so it was checked, not trusted).
+No config.el override needed.
+
+**Debugging — lldb, not gdb, and why**: researched directly against
+dape's own source rather than guessed. dape's built-in `gdb` config's
+`modes` list is `(c-mode c++-mode hare-mode ...)` — rust-mode is absent.
+Its `lldb-dap`/`lldb-vscode` configs' shared `modes` list is `(c-mode
+c++-mode rust-mode rust-ts-mode rustic-mode ...)` — dape's own
+maintainers already treat Rust as an lldb language. Using lldb means
+zero elisp config; gdb would have needed its `modes` list extended by
+hand. Full reasoning (including that both debuggers are now equally
+officially supported by rust-lang/rust's own pretty-printers, so that
+wasn't the deciding factor) is in DECISIONLOG.md, along with a
+deliberate decision *not* to also flip C/C++ from gdb to lldb — gdb
+there is already installed, tested, and asserted by an existing
+smoketest.bats case, and there's no concrete gdb-for-C problem motivating
+a switch. Installing `lldb` for Rust does incidentally register its dape
+configs for c-mode/c++-mode too (already in that same `modes` list) —
+so C/C++ gets lldb as a free alternative in `SPC d d`'s menu regardless,
+without any code change.
+
+**Not installed, deliberately**: `cargo-audit`/`cargo-outdated` (optional
+cargo subcommands Doom's module also wires bindings for) — not part of
+the LSP+debugger scope, matching this image's existing precedent of
+leaving some Doom-supported extras uninstalled (ccls, deno, solargraph,
+eslint). Those two bindings will error if pressed; documented as expected
+in both rust-keybindings.el and the flight-test.
+
+**Testing**: `smoketest.bats` gained a `test.rs` fixture, a tool-install
+check (`cargo`/`rust-analyzer`/`rustfmt`/`cargo-clippy`/`lldb-dap`,
+pinned-version assertion for `cargo`), mode-activation + rust-analyzer-
+connects checks, a dape `lldb-dap` config coverage check (mirroring the
+existing gdb/c-mode one), and a localleader resolution check covering
+both Doom's own cargo bindings and this file's added `SPC m f`. A real
+two-file flight-test project (`flight-tests/rust/`: `Cargo.toml`,
+`src/main.rs`, `src/counter.rs`) exercises cross-file go-to-definition,
+`cargo test`, and a commented-out deliberate type error for diagnostics,
+with a `rust-flight-test.md` checklist mirroring go-flight-test.md's
+shape. `rust-keybindings.el`/`config.el`/`init.el` re-confirmed against
+the load!/Dockerfile-COPY cross-check (standard practice since the
+`typescript-keybindings.el` gap earlier this session, where `load!` was
+wired but the `COPY` line was missed — `rust-keybindings.el` already had
+its `COPY` line from its original stub state, confirmed before writing
+any real content into it, so no gap this time).
+
+**Not yet verified end-to-end against a live rebuild**: everything above
+was checked statically (dape.el's real source, apheleia's real defaults,
+Doom's rust module source fetched at the exact pinned commit, `lldb`/
+`gdb` versions confirmed live in a throwaway `ubuntu:26.04` container)
+rather than assumed, but none of it has been run against an actual
+rebuilt image yet — rust-analyzer connecting, `SPC d d` actually hitting
+a breakpoint via lldb-dap, and the keybindings resolving in a live daemon
+all still need confirming once the image builds. x86_64 mirror applied
+in lockstep while aarch64 builds.

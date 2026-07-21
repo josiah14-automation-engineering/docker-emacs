@@ -60,6 +60,7 @@
        org
        (python +lsp +pyright)
        (ruby +lsp)
+       (rust +lsp)
        (sh +lsp)
        yaml
 

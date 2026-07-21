@@ -2076,3 +2076,28 @@ end-to-end against a live rebuild on this port; pending Josiah's build
 here (the aarch64 port was being built in parallel while this mirror was
 written).
 
+#### Rust added as an eighth full-support language
+
+Mirrored file-for-file from the aarch64 port (`Dockerfile`, `init.el`,
+`config.el`, `rust-keybindings.el`, `flight-tests/rust/`,
+`smoketest.bats`, `README.md`, `DECISIONLOG.md`) — same rationale applies
+throughout (rustup pinned to `1.97.1` rather than apt, `rustic-mode` not
+plain `rust-mode`, lldb over gdb for the debugger, `SPC m f` the only
+addition to Doom's own already-extensive rustic-mode localleader map).
+See the aarch64 tree's own BUILDLOG.md entry for the full reasoning.
+
+**One real divergence, not just a mirror**: Ubuntu 24.04's plain `lldb`
+apt package is LLVM 18.1.3 and ships neither `lldb-dap` nor `lldb-vscode`
+at all — confirmed live in a throwaway `ubuntu:24.04` container, after
+the aarch64 port's plain `lldb` (LLVM 21 there, ships `lldb-dap` directly)
+made it seem like a non-issue. `lldb-20` is the oldest versioned package
+available in 24.04's default repos that does ship it, but only as
+`lldb-dap-20`, not the bare name dape's `lldb-dap` config expects —
+symlinked to `/usr/local/bin/lldb-dap`, the same pattern this Dockerfile
+already uses for `lua5.4` → `lua`. Documented in the apt-package comment
+block rather than silently diverging from the aarch64 approach without
+explanation.
+
+**Not yet verified end-to-end against a live rebuild on this port**;
+pending a build here (aarch64 was already rebuilding when this mirror was
+written).

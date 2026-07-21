@@ -132,6 +132,7 @@
 (load! "ruby-keybindings")
 (load! "javascript-keybindings")
 (load! "typescript-keybindings")
+(load! "rust-keybindings")
 (load! "nu-keybindings")
 (load! "c-keybindings")
 (load! "cmake-keybindings")

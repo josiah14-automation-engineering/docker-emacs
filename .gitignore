@@ -4,3 +4,4 @@ host/
 .host-nix-bridge/
 **/flight-tests/*/build/
 **/flight-tests/*/.cache/
+**/flight-tests/*/target/
