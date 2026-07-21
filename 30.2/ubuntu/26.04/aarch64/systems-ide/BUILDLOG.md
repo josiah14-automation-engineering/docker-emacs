@@ -1937,3 +1937,73 @@ directly to the paused process via the REPL (per its own welcome message:
 bug anywhere in this stack; a general, easy-to-forget consequence of how
 piped stdout behaves, worth remembering for any future language's own
 debugger validation pass.
+
+---
+
+#### Go/dlv debugging validated live -- same class of root-detection bug as CMake's, one layer further down
+
+Circled back to validate the one debugger integration from this whole
+systems-ide effort that had never actually been driven end-to-end: Go's
+`dlv` config, working since the original Go bring-up by every account in
+this log, but never live-tested against a project nested inside a larger
+git repo the way flight-tests/go/ is.
+
+`SPC d d` against `flight-tests/go/flight-test.go` errored immediately:
+
+```
+Building .Build Error: go build -o /home/josiah/Development/personal/automation-engineering/docker-emacs/__debug_bin1939784951 -gcflags all=-N -l .
+go: cannot find main module, but found .git/config in /home/josiah/Development/personal/automation-engineering/docker-emacs
+	to create a module there, run:
+	go mod init (exit status 1)
+```
+
+`go build` ran from the docker-emacs repo root, not from flight-tests/go/
+where the actual `go.mod` lives. dape's built-in `dlv` config launches
+delve with `:program "."`/`:cwd "."` -- both resolved by delve itself
+relative to the *adapter process's own* working directory
+(`command-cwd`, defaulting to `dape-command-cwd` -> `project-current`).
+Traced live via `emacsclient -e`: `project-current` was returning the
+docker-emacs repo root, not flight-tests/go/, even after confirming
+`go.mod` sits right there and even after adding `"go.mod"` to
+`project-vc-extra-root-markers` and clearing project.el's own root
+cache by hand -- the marker made no difference at all. Root cause one
+layer further down than expected: Doom prepends `project-projectile`
+ahead of project.el's own VC backend in `project-find-functions`
+(confirmed via `(default-value 'project-find-functions)` against the
+live daemon), so it's Projectile's root-finding that actually wins, and
+`projectile-project-root-files-bottom-up` -- the marker list that
+correctly handles a project nested inside a bigger VCS tree -- has no
+`go.mod` entry at all (nor `CMakeLists.txt`, for what it's worth; C/CMake
+just never hit this because `+dape-cmake-program` already bypasses
+`project-current` entirely for its own `:program` resolution).
+
+Exact same class of bug as `+cmake--root`'s near-miss from the original
+C/CMake bring-up -- project-root machinery assuming a VCS boundary is
+the real project boundary -- just surfacing here because Go's dlv config
+is the one debugger integration in this file that never got its own
+`locate-dominating-file`-based bypass the way cargo and CMake did.
+
+**Fix:** `dape-config.el` gains `+dape-go-root`, walking up for `go.mod`
+directly (same shape as `+dape-cargo-program`/`+dape-cmake-program`),
+and overrides the `dlv` config's `command-cwd` to use it instead of
+dape's default `project-current`-based guess. No change to
+`project-vc-extra-root-markers` or Projectile's own root-file lists --
+narrower blast radius, and consistent with how the other two debuggers
+already sidestep project-root detection rather than trying to fix it
+globally.
+
+**Verified live, twice** (once patching `dape-configs` ad hoc via
+`emacsclient -e` to confirm the fix shape works at all, once more after
+writing the real fix to `dape-config.el` and `load-file`ing it fresh into
+the running daemon to confirm the actual on-disk file is what's tested,
+not a hand-patched approximation of it): `SPC d d` now builds from
+flight-tests/go/ correctly, breakpoint on `fmt.Println(message)` stops
+there with `message "Hello"` populated in the Scope buffer. Only verified
+on aarch64 so far; x86_64 mirrors the same fix but hasn't been
+independently confirmed against its own rebuilt image.
+
+**Not yet done:** this fix lives in the source tree only -- the running
+container this was tested against had `dape-config.el` reloaded live via
+`load-file` for verification, but its baked-in image still predates this
+change. A rebuild is needed before `SPC d d` picks this up by default in
+a fresh container.

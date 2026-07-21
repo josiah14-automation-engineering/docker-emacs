@@ -14,13 +14,11 @@
 ;; :program "a.out" -- a generic placeholder from C's `cc foo.c' default
 ;; output name, wrong for both cargo (target/debug/<bin>) and this repo's
 ;; CMake convention (build/<target>, see +cmake--root in
-;; cmake-keybindings.el). Unlike delve's :program "." (Go's tooling runs
-;; straight from a package directory, no binary path needed at all), lldb
-;; and gdb both require an actual compiled binary path, so there's no
-;; equivalent trick -- it has to be resolved per-project. dape evaluates
-;; function-valued config entries with no arguments and substitutes the
-;; return value, so :program can point at a resolver instead of a literal
-;; string.
+;; cmake-keybindings.el). lldb and gdb both require an actual compiled
+;; binary path, so there's no shortcut -- it has to be resolved per-project.
+;; dape evaluates function-valued config entries with no arguments and
+;; substitutes the return value, so :program can point at a resolver
+;; instead of a literal string.
 (after! dape
   (defun +dape-cargo-program ()
     "Path to the current cargo project's build output, or nil.
@@ -63,6 +61,26 @@ anything else (e.g. a bare `cc foo.c')."
     (when-let* ((config (alist-get name dape-configs)))
       (setf (alist-get name dape-configs)
             (plist-put config :program #'+dape-resolve-program))))
+
+  ;; dape's built-in `dlv' config launches delve with `:program "."'/
+  ;; `:cwd "."' -- both resolved by delve itself relative to the *adapter
+  ;; process's own* working directory, i.e. `command-cwd', which defaults
+  ;; to `dape-command-cwd' -> `project-current'. Doom prepends
+  ;; `project-projectile' ahead of project.el's own VC backend in
+  ;; `project-find-functions', and `projectile-project-root-files-bottom-up'
+  ;; has no `go.mod' entry -- so a Go module nested inside this repo's own
+  ;; git tree (e.g. flight-tests/go/) resolves to the outer git root
+  ;; instead, and `go build .' fails there with "cannot find main module".
+  ;; Same class of bug as +cmake--root; same fix shape: walk up for the
+  ;; real marker file directly instead of trusting project/projectile.
+  (defun +dape-go-root ()
+    "Directory containing the nearest go.mod, or dape's own guess as fallback."
+    (or (locate-dominating-file default-directory "go.mod")
+        (dape-command-cwd)))
+
+  (when-let* ((config (alist-get 'dlv dape-configs)))
+    (setf (alist-get 'dlv dape-configs)
+          (plist-put config 'command-cwd #'+dape-go-root)))
 
   ;; lldb-dap's launch handler tries to disable ASLR via `personality()'
   ;; before running the debuggee, same as gdb -- but where gdb just warns
