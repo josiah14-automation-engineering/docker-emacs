@@ -83,7 +83,37 @@
   ;; for free since the whole release archive was extracted as a tree,
   ;; not just this one binary copied out.
   (setq lsp-clients-lua-language-server-bin
-        (expand-file-name "~/.local/lib/lua-language-server/bin/lua-language-server")))
+        (expand-file-name "~/.local/lib/lua-language-server/bin/lua-language-server"))
+  ;; Both `ruby-lsp` and `rubocop --lsp` register as LSP clients for
+  ;; ruby-mode (rubocop-ls, rubocop's own built-in LSP mode); rubocop-ls's
+  ;; priority (-1) beats ruby-lsp-ls's (-2), so lsp-mode picked rubocop-ls
+  ;; alone -- and rubocop's LSP server only implements diagnostics/
+  ;; formatting, not completion, silently leaving ruby-mode buffers with
+  ;; lsp-mode reporting "on" but zero completion candidates ever offered.
+  ;; Disabled so ruby-lsp-ls (the completion-capable server) attaches
+  ;; instead; rubocop still runs diagnostics via flycheck's own built-in
+  ;; ruby-rubocop checker (see ruby-keybindings.el), so nothing is lost.
+  (add-to-list 'lsp-disabled-clients 'rubocop-ls)
+  ;; ruby-lsp's own internal bootstrap hard-requires the `bundle`
+  ;; executable and a specific pinned gem set (see the Dockerfile's
+  ;; BUNDLE_GEMFILE comment for the full story -- this isn't optional the
+  ;; way it looks from lsp-ruby-lsp.el's docstring). `t` here makes
+  ;; lsp-mode launch `bundle exec ruby-lsp` against that pre-built,
+  ;; offline, pinned bundle rather than a bare `ruby-lsp`, which -- with
+  ;; the BUNDLE_GEMFILE env var also set globally in the Dockerfile --
+  ;; would otherwise skip ruby-lsp's own bootstrap entirely and load
+  ;; whatever gem versions happen to be active, unpinned.
+  (setq lsp-ruby-lsp-use-bundler t))
+
+;; apheleia (Doom's :editor format backend) defaults python-mode to black
+;; and ruby-mode to prettier-ruby (an npm-based prettier plugin) -- both
+;; overridden so each language uses just one already-installed tool for
+;; both linting and formatting, rather than pulling in a second, unrelated
+;; toolchain (black needs its own pip/pipx install; prettier-ruby needs a
+;; Node-based plugin) for formatting alone.
+(after! apheleia
+  (setf (alist-get 'python-mode apheleia-mode-alist) 'ruff)
+  (setf (alist-get 'ruby-mode apheleia-mode-alist) 'rubocop))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; load language configs and keybindings
@@ -98,6 +128,10 @@
 (load! "nix-keybindings")
 (load! "bats-keybindings")
 (load! "lua-keybindings")
+(load! "python-keybindings")
+(load! "ruby-keybindings")
+(load! "javascript-keybindings")
+(load! "typescript-keybindings")
 (load! "nu-keybindings")
 (load! "c-keybindings")
 (load! "cmake-keybindings")

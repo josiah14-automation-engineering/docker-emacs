@@ -1925,3 +1925,154 @@ here in lockstep with the aarch64 fix. Not yet verified end-to-end
 against a rebuild on this port; pending Josiah's build attempt here.
 
 ---
+
+#### Python, Ruby, and JavaScript added as a glue-script tier — LSP on, project tooling off
+
+Design discussion landed on a real distinction from the original plan:
+these three (plus the still-unbuilt Ruby/Perl/Fish/Assembly batch) were
+originally slated "syntax only, no LSP" — but LSP's actual value doesn't
+depend on having a project. Modern language servers handle a lone file in
+an inferred single-file project just fine for anything within the
+standard library, which is most of what a systems-context script actually
+is (Ruby for Chef recipes, not Rails; Python for WM/DE config scripting
+and one-off Fabric tasks, not framework development). What breaks without
+a project is narrower than "everything" — just resolution of actual
+third-party imports. So: LSP on for all three, but deliberately **no**
+pip/poetry/conda, no bundler/rvm/rbenv/chruby, no node_modules-based
+tooling — scoped to editing/linting isolated scripts, never to developing
+applications in these languages (a job this project already has a
+separate dedicated IDE for, per `python-doom-emacs-ide` in the root
+`README.md`'s image table — `README.md`'s new "Language grouping
+philosophy" section, written this session, documents the full
+reasoning).
+
+Linters and formatters were explicitly back in scope this time (a
+correction from the original syntax-only plan, which had neither) —
+Josiah's framing: "style and discipline are always important even for
+just scripting."
+
+**Python**: `(python +lsp +pyright)`. `pyright` chosen over the newer
+`ty` (also supported by lsp-mode via `clients/lsp-python-ty.el`, and
+listed first/"recommended" in Doom's own module README) — `ty-ls` is
+registered `:add-on? t`, meaning it runs *alongside* a primary client
+rather than replacing one, so it wouldn't have been sufficient alone
+regardless; `pyright` is the long-established, single, well-supported
+choice, matching this project's repeated preference for one mature tool
+over a newer one still establishing itself (clangd over ccls, `ty` not
+pursued for the same reason). Installed via `npm install -g
+pyright@1.1.411`, matching `bash-language-server`'s existing install
+shape exactly.
+
+`ruff` handles both linting (flycheck's built-in `python-ruff` checker —
+confirmed directly from flycheck's own source that this checker's
+`--config` flag uses flycheck's `config-file` cell type, meaning it's
+simply omitted when no `pyproject.toml`/`ruff.toml` is found rather than
+erroring, so it's genuinely zero-config-capable) and formatting
+(overriding apheleia's own default of `black` for `python-mode`).
+Considered installing `black` instead (apheleia's default, zero override
+needed) — Josiah's call after discussing the tradeoff: `ruff format` is
+explicitly built to match Black's own output, so the actual formatted
+result is nearly identical either way; the reason to prefer `ruff` is
+purely that it's already required for linting, so using it for both
+avoids installing a second, unrelated tool via `pipx` for formatting
+alone. `ruff format`'s configurability was checked directly against its
+live JSON schema rather than assumed (`quote-style`, `skip-magic-trailing-
+comma`, `indent-style`, `indent-width`, `line-ending`, `docstring-code-
+format`, `preview` are the real, current knobs) — genuinely more
+configurable than Black, though still deliberately opinionated by design,
+not sprawling like Prettier/clang-format.
+
+Ruff's own docs were checked (not assumed) for a **user-level config**
+mechanism, since the whole point here is style preferences applying to a
+lone script with no project file of its own: `${config_dir}/ruff/
+pyproject.toml` (on Linux, XDG-style, via the `etcetera` crate's base
+strategy) is used whenever no project-level config is found in the
+directory hierarchy — and a real project's own config still takes
+precedence automatically if one ever exists. Baked in as
+`ruff-pyproject.toml`, `COPY`'d to exactly that path, encoding Josiah's
+actual style decisions from this session's discussion: 2-space indents,
+LF line endings, docstring code formatting on, no preview features
+("systems programmers should optimize for stability"), and — after
+initially discussing disabling it — magic trailing comma left **on**
+("if I want everything on one line, I can just delete that comma, and
+the pattern then is consistent").
+
+**Ruby**: `(ruby +lsp)`, no `+rails`/`+rvm`/`+rbenv`/`+chruby`. `ruby-lsp`
+(Shopify's, the actively-maintained modern choice) over `solargraph` —
+confirmed via `lsp-mode`'s own `lsp-ruby-lsp.el` that `lsp-ruby-lsp-use-
+bundler` defaults to `nil`, so it runs as plain `ruby-lsp` with no
+Gemfile/bundler involvement at all, matching this tier's scope exactly;
+solargraph isn't installed, so there's no ambiguity between the two for
+lsp-mode to resolve. Both `ruby-lsp` and `rubocop` installed via global
+`gem install --no-document` (no bundler). `rubocop` handles both linting
+(flycheck's built-in `ruby-rubocop` checker, same zero-config-friendly
+`config-file`-cell pattern as `python-ruff`) and formatting (`rubocop -a`,
+overriding apheleia's own default of `prettier-ruby` for `ruby-mode` —
+checked directly and confirmed apheleia's default surprisingly pulls in
+an npm-based `@prettier/plugin-ruby`, a whole separate JS toolchain, just
+to format Ruby; `rubocop` avoids that entirely, one Ruby-native tool
+already needed for linting doing both jobs).
+
+**JavaScript**: `(javascript +lsp)`, wired to `typescript-language-server`
++ its `typescript` peer (not `deno`, the module's other supported
+server), both via npm, matching the existing `bash-language-server`
+install shape. Linting deliberately uses `oxlint`, not `eslint` — checked
+flycheck's own two checker definitions directly: `javascript-eslint` has
+a dedicated `flycheck--eslint-handle-suspicious` code path specifically
+for the "no config found" case (confirming this is a known, expected
+friction point, not an edge case), while `javascript-oxlint`'s `:command`
+is just `oxlint --format checkstyle <file>` with no config-file handling
+at all — genuinely zero-config, the same role `ruff`/`rubocop` play for
+their languages. `eslint` isn't installed, so there's no checker
+ambiguity for flycheck to resolve. Formatting uses apheleia's own
+existing default (`prettier`) for `js-mode`, unchanged — no override
+needed, unlike Python/Ruby.
+
+**Design inconsistency found and *not* fixed, on purpose, out of
+scope**: `c-keybindings.el`/`lua-keybindings.el`'s on-demand format
+binding calls `lsp-format-buffer` (the LSP server's own formatting
+capability), while `python-keybindings.el`/`ruby-keybindings.el`/
+`javascript-keybindings.el` (written this session) call
+`apheleia-format-buffer` directly instead. `pyright` does not implement
+LSP-level document formatting at all (confirmed by the fact that
+`python-mode` needs its own independent apheleia formatter mapping
+regardless of LSP server choice — if pyright formatted, this wouldn't be
+necessary), so `lsp-format-buffer` would have been a silent no-op for
+Python specifically; using `apheleia-format-buffer` uniformly for the
+three new languages also guarantees the on-demand and on-save paths
+always use the *identical* formatter, which isn't strictly guaranteed by
+the older `lsp-format-buffer` pattern (clangd/lua-language-server happen
+to agree with clang-format/stylua's output, but that's coincidence, not a
+guarantee). Reconciling `c-keybindings.el`/`lua-keybindings.el` to the
+same pattern is a reasonable future cleanup, deliberately not done here.
+
+**Bug found on the aarch64 port's build attempt: `rubocop:1.81.9`
+doesn't exist.** `gem install --no-document ruby-lsp:0.24.1
+rubocop:1.81.9` failed with `ERROR: Could not find a valid gem 'rubocop'
+(= 1.81.9)`. Every other version pin this session (`pyright`,
+`typescript-language-server`, `typescript`, `prettier`, `oxlint` via the
+npm registry API; `ruff`, `lua-language-server`, `stylua` via the GitHub
+releases API) was checked against a real registry before being written
+down — this one wasn't, a real lapse (see `[[feedback_verify_pkgs_before_
+build]]`, updated this session to note the recurrence). Checked
+rubygems.org's own API directly: the real current version is `1.88.2`.
+Fixed in both ports' Dockerfiles and `smoketest.bats`'s version
+assertion, applied here in lockstep with the aarch64 fix.
+
+**Testing**: `smoketest.bats` gained fixtures (`test.py`/`test.rb`/
+`test.js`), tool-install checks for all nine new binaries/packages
+(asserting pinned versions, matching the `gopls`/`dlv`/`golangci-lint`
+regression-guard convention), mode-activation + LSP-load checks for all
+three languages, format-buffer keybinding resolution checks, and a direct
+check that `apheleia-mode-alist` actually resolves to `(ruff rubocop)`
+for `(python-mode ruby-mode)` rather than trusting the `setf` calls
+silently succeeded. 64 `@test` cases now (was 51), mirrored file-for-file
+from the aarch64 port once its own `rubocop` version fix landed. Every
+new/touched `.el` file (`config.el`, `init.el`, `python-keybindings.el`,
+`ruby-keybindings.el`, `javascript-keybindings.el`) confirmed parsing via
+`emacs-lisp-mode`'s `check-parens`; every `.el` file in the directory
+re-confirmed to have a matching Dockerfile `COPY` line. Not yet verified
+end-to-end against a live rebuild on this port; pending Josiah's build
+here (the aarch64 port was being built in parallel while this mirror was
+written).
+

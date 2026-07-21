@@ -1,0 +1,18 @@
+# Global default ruff config for systems-ide's Python glue-script tier --
+# applies whenever a lone script has no project-level pyproject.toml/
+# ruff.toml/.ruff.toml of its own (ruff's own user-level config fallback,
+# see "Config file discovery" in ruff's docs). Any real project's own
+# config takes precedence over this automatically. Installed at
+# ~/.config/ruff/pyproject.toml -- that exact path/filename is required
+# for ruff's user-level fallback to find it.
+
+[tool.ruff]
+indent-width = 2
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+skip-magic-trailing-comma = false
+docstring-code-format = true
+preview = false

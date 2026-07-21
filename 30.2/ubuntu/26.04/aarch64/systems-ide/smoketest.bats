@@ -34,7 +34,16 @@ EOF
   cat > /tmp/smoketest/test.lua <<'EOF'
 print("hi")
 EOF
-  cat > /tmp/smoketest/test.zsh <<'EOF'
+  cat > /tmp/smoketest/test.py <<'EOF'
+print("hi")
+EOF
+  cat > /tmp/smoketest/test.rb <<'EOF'
+puts "hi"
+EOF
+  cat > /tmp/smoketest/test.js <<'EOF'
+console.log("hi");
+EOF
+  cat > /tmp/smoketest/test.ts <<'EOF'
 #!/bin/zsh
 echo hi
 EOF
@@ -208,6 +217,54 @@ eval_elisp() {
   [[ "$output" =~ "2.5.2" ]]
 }
 
+@test "python3, pyright, and ruff are installed" {
+  run python3 --version
+  [ "$status" -eq 0 ]
+  run pyright --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "1.1.411" ]]
+  run ruff --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.15.22" ]]
+}
+
+@test "ruby, ruby-lsp, and rubocop are installed" {
+  run ruby --version
+  [ "$status" -eq 0 ]
+  run ruby-lsp --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.24.1" ]]
+  run rubocop --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "1.88.2" ]]
+}
+
+@test "typescript-language-server, prettier, and oxlint are installed" {
+  run typescript-language-server --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "5.3.0" ]]
+  run prettier --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "3.9.5" ]]
+  run oxlint --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "1.74.0" ]]
+}
+
+@test "cargo, rust-analyzer, rustfmt, and clippy are installed" {
+  run cargo --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "1.97.1" ]]
+  run rust-analyzer --version
+  [ "$status" -eq 0 ]
+  run rustfmt --version
+  [ "$status" -eq 0 ]
+  run cargo-clippy --version
+  [ "$status" -eq 0 ]
+  run lldb-dap --version
+  [ "$status" -eq 0 ]
+}
+
 @test "opening a .bash file activates sh-mode with the bash dialect" {
   # sh-mode is the only major mode for shell scripts; bash vs zsh is tracked
   # by the buffer-local sh-shell variable, not a separate major mode (this is
@@ -338,6 +395,109 @@ eval_elisp() {
   [[ "$output" =~ "t" ]]
 }
 
+@test "opening a .py file activates python-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.py") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "python-mode" ]]
+}
+
+@test "lsp-mode loads when a python-mode buffer is opened ((python +lsp +pyright))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.py") (featurep (quote lsp-mode)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
+@test "opening a .rb file activates ruby-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.rb") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ruby-mode" ]]
+}
+
+@test "lsp-mode loads when a ruby-mode buffer is opened ((ruby +lsp))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.rb") (featurep (quote lsp-mode)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
+# Regression test: rubocop also registers its own LSP client (rubocop-ls,
+# from `rubocop --lsp`) for ruby-mode, and used to silently win the
+# client-priority contest over ruby-lsp-ls (see config.el's
+# lsp-disabled-clients comment) -- lsp-mode would report "loaded" and
+# "on" with rubocop-ls alone attached, but rubocop's LSP server only
+# implements diagnostics/formatting, never completion. Asserting the
+# featurep check above passes is not enough to catch that; this asserts
+# the actually-useful server is the one that connects.
+@test "ruby-lsp-ls (not rubocop-ls) connects for ruby-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.rb")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ruby-lsp-ls" ]]
+  [[ ! "$output" =~ "rubocop-ls" ]]
+}
+
+@test "opening a .js file activates js-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.js") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "js" ]]
+}
+
+@test "lsp-mode loads when a js-mode buffer is opened ((javascript +lsp))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.js") (featurep (quote lsp-mode)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
+# Regression test: typescript-language-server needs the classic
+# lib/tsserver.js that TypeScript 7.0's native (Go-ported) rewrite
+# dropped -- see the Dockerfile's typescript pin comment. ts-ls would
+# still report a successful initial connection in the log, then crash
+# moments later with "Unable to find tsserver" once it actually tried to
+# load the typescript package, leaving lsp-workspaces empty. The featurep
+# check above passes either way; this catches the actual crash.
+@test "ts-ls connects and stays connected for js-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.js")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (sleep-for 2)
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ts-ls" ]]
+}
+
+@test "opening a .ts file activates typescript-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ts") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "typescript-mode" ]]
+}
+
+@test "lsp-mode loads and ts-ls connects for typescript-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.ts")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (sleep-for 2)
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "ts-ls" ]]
+}
+
+# `.ts' files use typescript-mode -- a separate keymap from js-mode-map --
+# and Doom's own :lang javascript module never wires SPC m f (or anything
+# else) for it. Confirmed by opening a .ts file before
+# typescript-keybindings.el existed: SPC m f resolved to nil.
+@test "typescript localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ts") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
 @test "dape's built-in gdb debug config covers c-mode/c++-mode (:tools debugger)" {
   run eval_elisp '(progn (require (quote dape)) (let ((modes (plist-get (alist-get (quote gdb) dape-configs) (quote modes)))) (list (memq (quote c-mode) modes) (memq (quote c++-mode) modes))))'
   [ "$status" -eq 0 ]
@@ -409,6 +569,30 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.lua") (key-binding (kbd "SPC m f")))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "lsp-format-buffer" ]]
+}
+
+@test "python localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.py") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+@test "ruby localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.rb") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+@test "javascript localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.js") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+@test "apheleia formatter overrides resolve (python-mode -> ruff, ruby-mode -> rubocop)" {
+  run eval_elisp '(progn (require (quote apheleia)) (list (alist-get (quote python-mode) apheleia-mode-alist) (alist-get (quote ruby-mode) apheleia-mode-alist)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(ruff rubocop)" ]]
 }
 
 @test "cmake localleader keybindings resolve (configure, build, rebuild, clean)" {

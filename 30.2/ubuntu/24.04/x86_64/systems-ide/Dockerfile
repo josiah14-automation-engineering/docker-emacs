@@ -48,6 +48,22 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV TERM=xterm-256color
 ENV NO_AT_BRIDGE=1
+# typescript-language-server internally needs to `require('typescript')`
+# to get at tsserver -- Node's own module resolution only checks a
+# project-local node_modules by default, not npm's global install
+# location, so a globally npm-installed `typescript` (this project's
+# whole point, for a lone script with no package.json) is otherwise
+# invisible to it. Confirmed directly against running ubuntu:26.04/24.04
+# containers rather than assumed: `npm root -g` resolves to
+# /usr/local/lib/node_modules on both.
+ENV NODE_PATH=/usr/local/lib/node_modules
+# typescript-language-server also needs the classic lib/tsserver.js that
+# ships inside the `typescript` package -- TypeScript 7.0's native
+# (Go-ported) rewrite dropped it entirely (package only exposes `tsc`
+# now), so pinning the npm install below to the last release that still
+# ships it (6.0.3) is required, not just NODE_PATH. Confirmed by
+# inspecting both packages' contents directly in a running container --
+# 7.0.2's lib/ has no tsserver*.js at all.
 ENV DOOMDIR=/home/${USERNAME}/.config/doom
 ENV PATH="/home/${USERNAME}/.config/emacs/bin:/home/${USERNAME}/.local/bin:${PATH}"
 ENV GOPATH=/home/${USERNAME}/go
@@ -174,7 +190,24 @@ RUN apt-get update -y && \
       `# lua-language-server and stylua are prebuilt release binaries,` \
       `# installed below -- only the interpreter itself comes from apt.` \
       lua5.4 \
-      `# --- fonts ---` \
+      `# --- python/ruby/js glue-script tier ---` \
+      `# Interpreters/runtimes only -- pyright, ruff, ruby-lsp, rubocop,` \
+      `# typescript-language-server, prettier, oxlint are all installed` \
+      `# below via npm/gem/binary release, not apt. No pip/poetry/conda,` \
+      `# no rvm/rbenv, no node_modules-based/per-project bundler workflow --` \
+      `# deliberately scoped to editing/linting isolated scripts, not` \
+      `# developing applications in these languages (see README.md's` \
+      `# "Language grouping philosophy"). The one exception: the bundler` \
+      `# gem itself (installed below, alongside ruby-lsp/rubocop) -- not` \
+      `# for per-project Gemfiles, but because ruby-lsp's own internal` \
+      `# bootstrap hard-requires the \`bundle\` executable regardless of` \
+      `# project structure (see the comment above the bundler RUN step).` \
+      `# libyaml-dev is psych's (a transitive ruby-lsp dependency) native-` \
+      `# extension build requirement for that same bootstrap.` \
+      python3 \
+      ruby \
+      ruby-dev \
+      libyaml-dev \
       adwaita-icon-theme \
       fontconfig \
       fonts-dejavu-core \
@@ -191,6 +224,42 @@ RUN git clone --depth 1 --branch "${ZSHDB_VERSION}" https://github.com/rocky/zsh
     && rm -rf /tmp/zshdb
 
 RUN npm install -g bash-language-server@5.6.0
+
+RUN npm install -g \
+      pyright@1.1.411 \
+      typescript-language-server@5.3.0 \
+      typescript@6.0.3 \
+      prettier@3.9.5 \
+      oxlint@1.74.0
+RUN gem install --no-document ruby-lsp:0.24.1 rubocop:1.88.2 bundler
+
+# ruby-lsp's exe/ruby-lsp (see its own source) only runs its internal
+# bundler bootstrap -- which shells out to `bundle` and crashes with
+# Errno::ENOENT if it isn't installed -- when BUNDLE_GEMFILE is unset. If
+# BUNDLE_GEMFILE *is* set, it instead assumes the caller already invoked
+# it via `bundle exec` and skips straight to loading its own libraries
+# using whatever gems are currently active, which (without an actual
+# `bundle exec`) just means "whatever's the highest-installed version of
+# each gem" -- for this image, that was rbs 4.0.3, which has an
+# unrelated load-order bug (`Pathname()` used before `require "pathname"`
+# runs) that crashes ruby-lsp on every startup. So this needs both parts
+# together, mirrored in lsp-ruby-lsp-use-bundler in config.el: a fixed,
+# pre-built, offline bundle (pinned to the exact gem versions installed
+# above, plus rbs pinned below that bug) that `bundle exec ruby-lsp`
+# activates, pointed to globally so every ruby-mode buffer reuses it
+# regardless of which directory it's opened from -- instead of ruby-lsp
+# writing its own `.ruby-lsp/Gemfile` into whatever project happens to be
+# open and hitting the network to resolve unpinned gem versions on every
+# fresh container.
+RUN mkdir -p /opt/ruby-lsp \
+    && printf 'source "https://rubygems.org"\ngem "ruby-lsp", "0.24.1"\ngem "debug"\ngem "rbs", "3.10.4"\ngem "rubocop", "1.88.2"\n' > /opt/ruby-lsp/Gemfile \
+    && BUNDLE_GEMFILE=/opt/ruby-lsp/Gemfile bundle install
+# Global on purpose, matching this image's "no per-project bundler
+# workflow" scope (see the apt-package comment above): a manual `bundle
+# install`/`bundle exec` run by hand in a container shell against some
+# other Gemfile would also pick this up rather than that project's own --
+# out of scope for what this glue-script tier is for.
+ENV BUNDLE_GEMFILE=/opt/ruby-lsp/Gemfile
 
 # nushell ships its own LSP server behind `nu --lsp` (nu-lsp), so this is the
 # only install step nushell support needs -- no separate language-server
@@ -370,6 +439,26 @@ RUN curl -fsSL "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STY
     && unzip -q /tmp/stylua.zip -d /home/${USERNAME}/.local/bin \
     && chmod +x /home/${USERNAME}/.local/bin/stylua \
     && rm /tmp/stylua.zip
+
+# ruff is a single self-contained binary (Rust), used for both linting
+# (flycheck's built-in python-ruff checker, no separate package needed)
+# and formatting -- overriding apheleia's own default of `black` for
+# python-mode (see config.el) so this is the only Python tool needed,
+# rather than installing black too via pipx alongside it. Checksum here
+# is ruff's own published .sha256 (confirmed against the real release),
+# unlike lua-language-server/stylua above, which don't publish one.
+RUN curl -fsSL "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/ruff-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/ruff.tar.gz \
+    && echo "${RUFF_SHA256}  /tmp/ruff.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/ruff.tar.gz -C /tmp \
+    && install -m 755 /tmp/ruff-x86_64-unknown-linux-gnu/ruff /home/${USERNAME}/.local/bin/ruff \
+    && rm -rf /tmp/ruff.tar.gz /tmp/ruff-x86_64-unknown-linux-gnu
+
+# Global default ruff style (2-space indent, LF line endings, docstring
+# code formatting, magic trailing comma left on) -- applies to any lone
+# script with no project-level ruff config of its own; a real project's
+# pyproject.toml/ruff.toml still takes precedence automatically. See
+# ruff-pyproject.toml's own header comment for the exact mechanism.
+COPY --chown=${USERNAME}:${USERNAME} ruff-pyproject.toml /home/${USERNAME}/.config/ruff/pyproject.toml
 
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 

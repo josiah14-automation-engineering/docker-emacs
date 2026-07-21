@@ -52,11 +52,14 @@
        data
        emacs-lisp
        (go +lsp)
+       (javascript +lsp)
        json
        (lua +lsp)
        markdown
        (nix +lsp)
        org
+       (python +lsp +pyright)
+       (ruby +lsp)
        (sh +lsp)
        yaml
 
