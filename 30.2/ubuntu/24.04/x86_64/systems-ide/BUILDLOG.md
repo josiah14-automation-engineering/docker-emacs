@@ -1824,6 +1824,8 @@ name that `PATH`, `HOME`, `USER`, `SSH_AUTH_SOCK`, `XDG_RUNTIME_DIR`, and
 end-to-end against a live rebuild on this port; pending Josiah's
 rebuild.
 
+---
+
 #### Lua added as a seventh full-support language
 
 Following a design discussion about scope: systems-ide isn't meant to be
@@ -2101,3 +2103,74 @@ explanation.
 **Not yet verified end-to-end against a live rebuild on this port**;
 pending a build here (aarch64 was already rebuilding when this mirror was
 written).
+
+#### Follow-up: aarch64 live verification found three bugs, mirrored here unverified
+
+Live testing against the rebuilt aarch64 image (see that tree's own
+BUILDLOG.md follow-up entry for full detail) turned up three bugs missed
+by the static review above:
+
+1. `rust-keybindings.el`'s `after! rustic-mode` never fired (`rustic-
+   mode` is the major-mode symbol, not the feature `rustic` `provide`s) —
+   `SPC m f` was silently dead. Fixed: `after! rustic`.
+2. dape's shared `gdb`/`lldb-dap`/`lldb-vscode` configs all hardcode
+   `:program "a.out"` — a C-oriented placeholder, wrong for both cargo
+   and this repo's CMake convention, and not Rust-specific (C/C++'s `gdb`
+   config had the identical latent gap, never exercised before). Fixed
+   with a shared `:program` resolver (`cargo build --message-format=json`
+   for Rust, a `./build/` executable scan for CMake), extracted into its
+   own cross-language `dape-config.el` rather than either language's
+   keybindings file.
+3. lldb-server hangs launching any binary at all on the aarch64 host,
+   reproduced identically from the container's default privileges all the
+   way up to full `--privileged` — ruling out a capability/seccomp
+   restriction as the cause, root cause still unidentified. gdb works
+   immediately at every privilege level on the same binaries. Decision:
+   route c-mode/c++-mode/rust-mode/rustic-mode/rust-ts-mode through `gdb`
+   exclusively; `lldb-dap`/`lldb-vscode`'s `modes` cleared so `SPC d d`
+   doesn't offer a silently-hanging option. `lldb` package stays
+   installed. Full reasoning in DECISIONLOG.md.
+
+All three fixes are mirrored into this tree's `rust-keybindings.el` and
+new `dape-config.el` (`load!`'d, `COPY`'d — same checklist as always).
+**Bug 3's finding is aarch64-only, unverified here** — this x86_64 build
+has not been run, so neither the lldb hang nor gdb's success against it
+have been independently confirmed on this port. The fix is applied
+preemptively on the assumption a hang this deep (survives `--privileged`)
+is more likely an lldb-server issue in general than an aarch64-specific
+one, but that assumption is exactly that. See DECISIONLOG.md's caveat on
+the corresponding entry. If lldb turns out to work fine here, this tree
+should keep it available even if aarch64 stays gdb-only.
+
+#### Same day, second follow-up: bug 3 wasn't a host/arch problem — two ordinary, fixable bugs, both resolved on aarch64
+
+Bug 3 above turned out to be a misdiagnosis. On the aarch64 tree: `strace`
+(now a permanent apt package there, and mirrored here too) traced the
+hang to `DEBUGINFOD_URLS` — Ubuntu's `/etc/profile.d/debuginfod.sh` sets
+it for every login shell, lldb has no interactive gate for it the way
+gdb does, and just hangs reaching `debuginfod.ubuntu.com`. Fixing that
+wasn't sufficient on its own, though — testing against the actual,
+unmodified `run.sh` (zero extra capabilities) surfaced the *original*
+`personality set failed` error again, since the earlier `--privileged`
+testing had been bypassing that problem the whole time rather than
+solving it. The real fix for that turned out to need no container
+privilege change at all: `lldb-dap` has its own dedicated DAP launch
+argument, `:disableASLR`, that skips the ASLR-disable syscall entirely
+when set false — found after two dead ends (`~/.lldbinit` and an
+`initCommands` launch argument both run too late to matter).
+
+Net result on aarch64: lldb debugging works correctly in the actual
+default container configuration, fixed by one Dockerfile `ENV` line
+(`DEBUGINFOD_URLS=""`) and one dape config key (`:disableASLR nil`) — no
+`run.sh` changes, no capability/seccomp loosening. This morning's gdb-flip
+is fully reverted; lldb is back as Rust's debugger and a free alternative
+for C/C++, exactly as originally decided. Full account, including why the
+privilege-level testing wasn't wasted work, is in DECISIONLOG.md.
+
+All of this is mirrored here (Dockerfile, `dape-config.el`,
+`rust-keybindings.el`, flight-test doc, DECISIONLOG.md) but **still not
+independently verified on this x86_64 tree** — same caveat as bug 3's
+original entry, just resolved in the opposite direction. Both fixes are
+generic enough (an env var; a standard lldb-dap DAP argument) that they
+should hold here too, but that's an expectation, not a confirmed result.
+

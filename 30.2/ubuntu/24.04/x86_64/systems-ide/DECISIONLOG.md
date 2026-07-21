@@ -101,13 +101,17 @@ under `SPC m f` (format) or another occupied slot.
 
 **Revisit if:** A per-container Nix daemon eliminates the need for host-store sharing.
 
-
 ---
 
 ## Rust debugging: lldb over gdb
 
 **Date:** 2026-07-19
-**Status:** Active
+**Status:** Active (reaffirmed 2026-07-20 — see "Debugging: lldb hang was
+DEBUGINFOD_URLS, not host/arch" below for the full round trip. This entry
+was briefly marked Superseded the same day, mirroring an aarch64 entry
+that misdiagnosed a hung environment variable as a fundamental lldb-
+server incompatibility; that entry has itself been superseded, and this
+decision stands as originally written.)
 
 **Decision:** Use lldb (via dape's `lldb-dap` config) as the debugger for
 Rust, not gdb. Install the plain `lldb` apt package; no elisp config
@@ -174,4 +178,195 @@ a specific gdb-for-C shortcoming would be churn, not improvement.
 **Revisit if:** A concrete gdb-for-C/C++ problem surfaces (a bug,
 missing feature, or version-gate breakage) that lldb doesn't share.
 
+**Update (2026-07-20, morning):** The "free alternative" framing above
+turned out to be wrong on the aarch64 build (lldb isn't actually usable
+there at all, hanging on any binary, not just C/C++'s) -- and this tree
+preemptively followed suit without independent x86_64 verification. The
+"keep gdb as primary" decision itself is unaffected and still stands;
+see "Debugging: lldb-server hangs on the aarch64 build host; gdb becomes
+the sole default for c/c++/rust here too" below for the full finding and
+the caveat about this tree specifically. lldb is no longer offered in
+`SPC d d`'s menu for c-mode/c++-mode either, pending its own
+verification here.
 
+**Update (2026-07-20, later the same day):** The aarch64 hang was
+misdiagnosed -- root-caused via `strace` as `DEBUGINFOD_URLS` (set by
+Ubuntu's default profile), not a host/arch incompatibility. Fixed at the
+image level in this tree too; lldb is a working "free alternative" again,
+exactly as this entry originally said. See "Debugging: lldb hang was
+DEBUGINFOD_URLS, not host/arch" below. This fix is *also* unverified on
+x86_64 specifically -- same caveat as the morning update, just resolved
+in the opposite direction.
+
+---
+
+## Debugging: lldb-server hangs on the aarch64 build host; gdb becomes the sole default for c/c++/rust here too
+
+**Date:** 2026-07-20
+**Status:** Superseded, same day — see "Debugging: lldb hang was
+DEBUGINFOD_URLS, not host/arch" below. Every empirical test recorded
+here (all performed on the aarch64 tree; this x86_64 entry was always a
+preemptive, unverified mirror) was real and reproduced correctly; the
+conclusion drawn from them (a fundamental, host/arch-level lldb-server
+incompatibility) was wrong. The privilege-level testing correctly ruled
+out capabilities/seccomp/SELinux as the cause -- it just didn't occur to
+check environment variables next, which is where the actual answer was.
+**Related issue:** Supersedes "Rust debugging: lldb over gdb" above;
+revises "C debugging: keep gdb as primary, lldb available as a free
+alternative" above.
+
+**Decision:** Route c-mode/c++-mode/rust-mode/rust-ts-mode/rustic-mode
+through dape's `gdb` config exclusively. Clear `lldb-dap`/`lldb-vscode`'s
+`modes` list entirely (empty -- not offered in `SPC d d`'s completion for
+any mode here) rather than uninstalling the `lldb` apt package, which
+stays.
+
+**Rationale:** Empirically confirmed on the aarch64 (26.04/M2) build --
+this x86_64 (24.04) tree has NOT been independently tested; the same fix
+is applied here preemptively, on the assumption that a hang this deep
+(reproduces under every container privilege level, including
+`--privileged`) is unlikely to be aarch64-specific rather than an
+lldb-server issue in general. That assumption is unverified. If lldb
+turns out to work fine on x86_64, this entry should be revised to keep
+lldb available here even if aarch64 stays gdb-only.
+- `lldb` (raw CLI and dape's DAP-mode adapter both) hangs indefinitely
+  trying to launch any compiled binary on the aarch64 host -- tested
+  against both a cargo-built Rust binary and a CMake-built C binary.
+  Confirmed under the container's default (zero extra) capabilities,
+  under `--cap-add=SYS_PTRACE`, under `--cap-add=SYS_PTRACE
+  --security-opt seccomp=unconfined`, and under full `docker run
+  --privileged` (every capability, seccomp disabled, confinement
+  disabled) -- the hang is identical regardless of container privilege
+  level, ruling out a Docker capability/seccomp/SELinux restriction as
+  the cause. Root cause not yet identified; under active, separate
+  investigation.
+- gdb works immediately with zero container/Dockerfile changes, on the
+  exact same (aarch64) binaries. It hits the same underlying
+  `personality()` ASLR-disable restriction lldb does in the container's
+  default (no extra capabilities) config, but treats it as a non-fatal
+  warning and proceeds anyway rather than aborting the launch.
+- Verified live end-to-end on the aarch64 build via the actual `SPC d d`
+  -> dape -> gdb DAP flow (not just raw CLI): breakpoint on `c.inc();`
+  in the Rust flight-test, launch, correct stop at `flight_test::main` /
+  `src/main.rs:17`, correct populated locals (`message "Hello"`, `c`
+  present). Not yet repeated on this x86_64 tree.
+- Keeping `lldb` installed rather than removing it: negligible image
+  size cost, and aarch64 container support for lldb-server may mature
+  later. If the hang gets root-caused and fixed (or turns out not to
+  reproduce on x86_64 at all), re-adding
+  rust-mode/rustic-mode/c-mode/c++-mode to `lldb-dap`'s `modes` in
+  dape-config.el is a one-line revert.
+
+**How it works:** see `dape-config.el` (extracted out of `config.el` as
+its own file -- this is genuinely cross-language, not specific to any
+one `:lang` module; also where the `:program` "a.out" fix lives).
+
+**Revisit if:** the lldb-server hang gets root-caused and fixed, either
+upstream or via a container-level workaround discovered here; or this
+x86_64 tree gets independently tested and lldb turns out to work fine
+here, in which case this entry should be split so x86_64 keeps lldb
+available while aarch64 stays gdb-only.
+
+---
+
+## Debugging: lldb was broken by two separate, fixable causes -- neither was the host/arch
+
+**Date:** 2026-07-20
+**Status:** Active
+**Related issue:** Root-causes and reverses the entry above; reaffirms
+"Rust debugging: lldb over gdb" and "C debugging: keep gdb as primary,
+lldb available as a free alternative" as originally decided.
+
+**Decision:** Two independent fixes, both applied, neither touching
+container capabilities/seccomp/`run.sh`:
+1. Clear `DEBUGINFOD_URLS` globally via `ENV DEBUGINFOD_URLS=""` in the
+   Dockerfile.
+2. Add `:disableASLR nil` to `lldb-dap`/`lldb-vscode`'s dape config in
+   `dape-config.el`.
+
+Revert `dape-config.el`'s `modes` changes from the entry above --
+`gdb`/`lldb-dap`/`lldb-vscode` all keep their original, un-touched
+default `modes` lists. The `:program` "a.out" fix from two entries back
+stays as-is -- always correct, unrelated to either of these.
+
+**Rationale, cause 1 (the hang):** Found and fixed on the aarch64 tree.
+`strace -f` on a hanging `lldb -b -o run -o quit` showed no `ptrace`/
+`personality`/`fork` call anywhere near the hang -- lldb was still inside
+`target create`, stuck in a socket read/poll loop on a TLS connection to
+`debuginfod.ubuntu.com`, which Ubuntu's `/etc/profile.d/debuginfod.sh`
+points every login shell at by default. gdb prompts and auto-declines
+non-interactively; lldb has no equivalent gate and just hangs.
+`DEBUGINFOD_URLS=""` turned a hang into a 0.2-second clean launch.
+
+**Rationale, cause 2 (`personality set failed: Operation not
+permitted`):** Also found on aarch64, the hard way -- clearing
+`DEBUGINFOD_URLS` alone was not sufficient; a rebuild tested against the
+actual, unmodified `run.sh` (zero extra capabilities) hit this exact
+error again, the very first one from this whole investigation. Same
+underlying restriction gdb hits too (a non-fatal warning there): this
+container's default seccomp profile denies the `personality()` syscall
+lldb-dap's launch handler calls to disable ASLR before running the
+debuggee. `~/.lldbinit` and an `initCommands` launch argument both run
+too late to matter -- lldb-dap's ASLR-disable happens inside its own
+launch-request handling, before either fires. `:disableASLR nil` is
+lldb-dap's own dedicated DAP launch argument for exactly this. Setting it
+skips the syscall entirely -- no capability, no seccomp override, no
+`run.sh` change of any kind.
+
+Full verification (raw CLI, live daemon restart, and the actual `SPC d d`
+-> dape -> lldb-dap DAP flow with a correct breakpoint stop and
+backtrace, all in the default `run.sh`-equivalent container with zero
+extra privileges) was done on aarch64; see that tree's DECISIONLOG.md
+entry of the same title for the complete account.
+
+This x86_64 tree's `lldb-20`/symlink setup (see the "One real divergence"
+note in BUILDLOG.md) is a different lldb build than aarch64's plain
+`lldb` package, but both fixes here are generic (an env var, and a DAP
+launch argument every lldb-dap build should support) -- applied on the
+same reasoning as the rest of this debugging saga's x86_64 mirror:
+preemptive, not independently verified on this tree yet.
+
+**Revisit if:** debuginfod support for system-library symbols becomes
+something this image actually wants (see aarch64 entry for the same
+note); ASLR-enabled debugging becomes actively wanted (rare); or this
+x86_64 tree gets independently tested and the picture turns out to differ
+(e.g. if `lldb-20`'s build handles either of these differently than the
+plain `lldb` package does).
+
+---
+
+## lldb-dap ignores every breakpoint: a real dape race condition, fixed with `:stopOnEntry`
+
+**Date:** 2026-07-20
+**Status:** Active
+
+**Decision:** Add `:stopOnEntry t` to `lldb-dap`/`lldb-vscode`'s config in
+`dape-config.el`. `defer-launch-attach` stays at its default (unset).
+
+**Rationale:** Found and fixed entirely on the aarch64 tree; see that
+tree's DECISIONLOG.md entry of the same title for the full account
+(live JSON-RPC tracing via temporary advice on `jsonrpc-connection-send`,
+reading `dape.el`'s actual source, ruling out `defer-launch-attach: t`
+which deadlocks instead of fixing it, three separate live confirmations
+including one after a full container restart). Short version: dape sends
+`launch` unconditionally right after `initialize`'s response, on a path
+independent of `setBreakpoints`/`configurationDone`, which only fire once
+the adapter sends its own `initialized` event whenever it's ready -- a
+genuine, unsynchronized race between the two dape sends. `:stopOnEntry`
+sidesteps it by pausing the process at its very first instruction
+regardless of breakpoints, giving the late `setBreakpoints` request time
+to land before anything resumes.
+
+**Cost:** every `SPC d d` now stops once at the process entry point
+before reaching any of your own breakpoints -- one extra `SPC d c` needed
+on every launch.
+
+This x86_64 tree's fix is a straight mirror, same reasoning as the rest of
+this debugging saga here: preemptive, not independently verified on this
+tree.
+
+**Revisit if:** this gets confirmed/reported upstream (`svaante/dape`)
+and fixed there, at which point `:stopOnEntry` could potentially come
+back out; a cleaner workaround is found that doesn't require the extra
+`SPC d c`; or this x86_64 tree gets independently tested and the picture
+turns out to differ.

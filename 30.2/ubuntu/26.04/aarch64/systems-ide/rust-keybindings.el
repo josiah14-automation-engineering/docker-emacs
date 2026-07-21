@@ -42,7 +42,10 @@
 ;; (alongside rust-mode/rust-ts-mode) in its `modes', the same way its
 ;; gdb config already covers c-mode/c++-mode -- so `SPC d d' just works
 ;; once lldb is on PATH (installed via apt), no elisp config needed here
-;; either.
+;; either. (A brief detour: this hung for a while on `DEBUGINFOD_URLS'
+;; being set by Ubuntu's default profile, which lldb has no interactive
+;; gate for the way gdb does -- fixed at the image level in the
+;; Dockerfile, not here. See DECISIONLOG.md for the full story.)
 ;;
 ;; LOCAL-LEADER — this file's own binding (SPC m ...):
 ;;   f   format buffer   (apheleia-format-buffer -- every other language
@@ -55,13 +58,11 @@
 
 ;;; Code:
 
-;; Wrapped in `after! rustic-mode' because rustic's own default
-;; localleader bindings are wired inside its `use-package! rustic
-;; :config' block, which runs lazily on first .rs file visit -- a plain
-;; map! call here would run at Doom config-load time instead, before
-;; that. Doesn't collide with rustic's own keys, but see go-keybindings.el
-;; for the concrete case where this ordering silently clobbered a binding.
-(after! rustic-mode
+;; Wrapped in `after! rustic' (the package/feature name -- `rustic-mode'
+;; is just the major-mode symbol it defines, `provide's as `rustic') so
+;; this runs after its own default localleader bindings are wired, not
+;; at Doom config-load time before rustic has even loaded.
+(after! rustic
   (map! :map rustic-mode-map
         :localleader
         :desc "Format buffer" "f" #'apheleia-format-buffer))

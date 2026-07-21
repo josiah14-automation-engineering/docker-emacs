@@ -35,14 +35,14 @@ ARG NU_VERSION=0.114.1
 ARG NU_SHA256=8802b26edcdf1a64477567b5ce909fbae3d72d731c8f0847892ea16c6fa73c53
 ARG CMAKE_LANGUAGE_SERVER_VERSION=0.1.11
 ARG CONAN_VERSION=2.30.0
-ARG LUA_LANGUAGE_SERVER_VERSION=3.18.2
-ARG LUA_LANGUAGE_SERVER_SHA256=273af33f26f4a1143f27c96d9f9e1188aba619c71e0807042134f66b4bd27f24
-ARG STYLUA_VERSION=2.5.2
-ARG STYLUA_SHA256=0ef2ebf0b7e5a652b65c4cb96c6d9ffb3981a98547de3c764465bbf54a8d761a
 ARG VCPKG_VERSION=2026.06.24
 ARG NUPM_COMMIT=9a28419bf91aadc58999d83e0f6ef8d9dbfa7d9f
+ARG LUA_LANGUAGE_SERVER_VERSION=3.18.2
+ARG LUA_LANGUAGE_SERVER_SHA256=ca71415dd19f19e30aaa35a4915aefca9fdb5fec31b98331cc3d77f778d539c5
+ARG STYLUA_VERSION=2.5.2
+ARG STYLUA_SHA256=bcb0d855e91f102f28a370e850f8566b3b44b79e6274d806ea5246837c0fd5ab
 ARG RUFF_VERSION=0.15.22
-ARG RUFF_SHA256=54ec426d839d7cea1096e9ea1c5486fd2f3df62ee6cfd71dc090b18f99bebd90
+ARG RUFF_SHA256=d535a4be6504146e757eff67b992f11a293a7a108be22e2a5898b32c32565996
 ARG RUST_VERSION=1.97.1
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
@@ -177,6 +177,10 @@ RUN apt-get update -y && \
       g++ \
       gdb \
       ninja-build \
+      `# syscall-level tracing -- routine enough in systems work (this` \
+      `# image's own lldb-server hang investigation is a case in point)` \
+      `# to earn a permanent spot rather than an ad-hoc install.` \
+      strace \
       `# pipx here rather than its own group -- only pulled in for` \
       `# cmake-language-server and conan, both installed just below.` \
       pipx \
@@ -195,6 +199,9 @@ RUN apt-get update -y && \
       `# LLVM 18 and ships no lldb-dap/lldb-vscode binary at all (unlike` \
       `# 26.04's, confirmed live in throwaway containers on both) -- lldb-20` \
       `# is the oldest versioned package here that does, exposed only as` \
+      `# lldb-dap-20; symlinked to the bare name dape expects below.` \
+      lldb-20 \
+      `# --- lua ide ---` \
       `# lua-language-server and stylua are prebuilt release binaries,` \
       `# installed below -- only the interpreter itself comes from apt.` \
       lua5.4 \
@@ -216,6 +223,7 @@ RUN apt-get update -y && \
       ruby \
       ruby-dev \
       libyaml-dev \
+      `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
       fonts-dejavu-core \
@@ -223,6 +231,16 @@ RUN apt-get update -y && \
       fonts-jetbrains-mono \
     && ln -sf /usr/lib/llvm-20/bin/lldb-dap /usr/local/bin/lldb-dap \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu's /etc/profile.d/debuginfod.sh sets DEBUGINFOD_URLS for every
+# login shell, pointing at debuginfod.ubuntu.com. gdb prompts before
+# using it and respects a non-interactive "no" -- lldb has no such gate
+# and just hangs indefinitely trying to reach it (root-caused via strace
+# on the aarch64 tree after it looked, at first, like a container
+# ptrace/capability problem; see DECISIONLOG.md). Cleared globally rather
+# than per-debugger-config, since it's not a debugger-specific setting to
+# begin with.
+ENV DEBUGINFOD_URLS=""
 
 RUN git clone --depth 1 --branch "${ZSHDB_VERSION}" https://github.com/rocky/zshdb.git /tmp/zshdb \
     && cd /tmp/zshdb \
@@ -234,6 +252,14 @@ RUN git clone --depth 1 --branch "${ZSHDB_VERSION}" https://github.com/rocky/zsh
 
 RUN npm install -g bash-language-server@5.6.0
 
+# npm's global prefix is root-owned (nodejs/npm installed via apt, above,
+# as root) -- these have to run here, before the USER switch below, for
+# the same reason bash-language-server does. gem's default install
+# location is likewise root-owned, so ruby-lsp/rubocop are installed
+# here too rather than alongside ruff's own ~/.local/bin install later in
+# this file (that one runs post-USER-switch, into the runtime user's own
+# home directory -- a different install location, not just a different
+# package manager).
 RUN npm install -g \
       pyright@1.1.411 \
       typescript-language-server@5.3.0 \
@@ -479,7 +505,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && /home/${USERNAME}/.cargo/bin/rustup component add rust-analyzer rust-src rustfmt clippy
 ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
 
-
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 
 COPY --chown=${USERNAME}:${USERNAME} config.el          /home/${USERNAME}/.config/doom/config.el
@@ -493,6 +518,10 @@ COPY --chown=${USERNAME}:${USERNAME} zig-keybindings.el    /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} cmake-keybindings.el  /home/${USERNAME}/.config/doom/cmake-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} docker-keybindings.el /home/${USERNAME}/.config/doom/docker-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} lua-keybindings.el    /home/${USERNAME}/.config/doom/lua-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} python-keybindings.el /home/${USERNAME}/.config/doom/python-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} ruby-keybindings.el   /home/${USERNAME}/.config/doom/ruby-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} javascript-keybindings.el /home/${USERNAME}/.config/doom/javascript-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} typescript-keybindings.el /home/${USERNAME}/.config/doom/typescript-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el    /home/${USERNAME}/.config/doom/nix-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.config/doom/bats-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} bats-config.el        /home/${USERNAME}/.config/doom/bats-config.el
@@ -501,6 +530,7 @@ COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
 COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nu-config.el          /home/${USERNAME}/.config/doom/nu-config.el
+COPY --chown=${USERNAME}:${USERNAME} dape-config.el        /home/${USERNAME}/.config/doom/dape-config.el
 COPY --chown=${USERNAME}:${USERNAME} global-keybindings.el /home/${USERNAME}/.config/doom/global-keybindings.el
 
 RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/config.el \

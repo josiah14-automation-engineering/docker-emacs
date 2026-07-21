@@ -1166,6 +1166,8 @@ is systems-ide's role here, not logic-ide's — fixing the one script that
 actually needs to compose with nesting is the root-cause fix, not
 propagating the same change everywhere on principle.
 
+---
+
 #### Lua added as a seventh full-support language
 
 Following a design discussion about scope: systems-ide isn't meant to be a
@@ -1519,3 +1521,346 @@ rebuilt image yet — rust-analyzer connecting, `SPC d d` actually hitting
 a breakpoint via lldb-dap, and the keybindings resolving in a live daemon
 all still need confirming once the image builds. x86_64 mirror applied
 in lockstep while aarch64 builds.
+
+#### Follow-up: live verification against the rebuilt aarch64 image found three bugs
+
+Everything in the entry above was checked against real source, not
+assumed — but static review still missed three bugs that only surfaced
+once the image actually built and got exercised live (`docker exec` into
+the built image, `emacsclient --eval` against a real daemon, the actual
+flight-test fixture).
+
+**Bug 1 — `SPC m f` silently dead.** `rust-keybindings.el` wrapped its one
+binding in `(after! rustic-mode ...)`. `rustic-mode` is the *major-mode
+symbol* the `rustic` package defines, not the feature it `provide`s —
+`(featurep 'rustic)` is `t`, `(featurep 'rustic-mode)` is `nil` — so that
+`after!` block never fired at all, silently (no error; it just never ran).
+Doom's own cargo bindings (`SPC m b b`/`SPC m b r`/`SPC m t a`) resolved
+fine since those load inside rustic's package `:config` block directly;
+only this file's own addition was affected. Fixed: `after! rustic`.
+Caught by literally pressing the key against a live buffer and comparing
+`(key-binding (kbd "SPC m f"))` to the other three — the exact
+`smoketest.bats` assertion already written for this, which is what
+should have caught it pre-review; it's a good reminder the smoketest
+still needs to actually *run* against a build, not just exist.
+
+**Bug 2 — `:program "a.out"`, and it's not Rust-specific.** Live-testing
+`SPC d d` produced `Cannot launch '.../target/debug/flight-test':
+personality set failed` — traced to dape's own built-in `gdb`/`lldb-dap`/
+`lldb-vscode` configs all hardcoding `:program "a.out"`, a leftover from
+C's `cc foo.c` default output name. Compared against `dlv` (Go's
+debugger): its `:program` is `"."`, since Go's tooling runs straight from
+a source directory — no binary-path problem to have. lldb/gdb both need
+an actual compiled-binary path, so there's no equivalent trick; it has to
+be resolved per-project. This is a *shared* dape default, not something
+either Doom or this repo's config had touched, and it affects C/C++'s
+`gdb` config identically — nobody had actually pressed `SPC d d` against
+the CMake-built C flight-test either, so that gap had been latent and
+unverified the whole time C was claimed as "full support." Fixed with a
+`:program` resolver function (dape evaluates function-valued config
+entries with no arguments and substitutes the result): `cargo build
+--message-format=json` for cargo projects (asks cargo directly for the
+authoritative output path rather than guessing `target/debug/<crate-
+name>`, which can differ from the `[[bin]]` name), and a `./build/`
+single-executable scan for CMake projects (matching `+cmake--root`'s
+existing convention in `cmake-keybindings.el`). This is genuinely cross-
+language config, not Rust-specific, so it moved to its own new
+`dape-config.el` (extracted out of `config.el`, `load!`'d, `COPY`'d in
+the Dockerfile — same file/load!/COPY checklist as any new elisp file
+here) rather than living in `rust-keybindings.el` or `c-keybindings.el`.
+Verified: both resolver functions checked directly against real builds
+(`+dape-cargo-program` → `target/debug/flight-test`; `+dape-cmake-program`
+→ `build/ctest`), not just read from source.
+
+**Bug 3 — lldb-server hangs launching any binary at all, on this
+host/arch.** Fixing bug 2 got debugging further, but `SPC d d` then hung
+instead of erroring. Isolated methodically rather than guessed at:
+- Reproduced with raw `lldb` CLI, bypassing dape/DAP entirely — same hang.
+- Reproduced against a CMake-built C binary too, not just Rust — ruling
+  out anything Rust-specific.
+- Tested under progressively looser container privilege: default (zero
+  extra capabilities) → `--cap-add=SYS_PTRACE` → `--cap-add=SYS_PTRACE
+  --security-opt seccomp=unconfined` → full `--privileged` (every
+  capability, no seccomp, no confinement). The hang was identical at
+  every level, which rules out a Docker capability/seccomp/SELinux
+  restriction as the cause — `--privileged` is the ceiling; nothing left
+  to grant.
+- gdb, tested the same way, worked immediately at every privilege level
+  including the container's unmodified default. It hits the same
+  underlying `personality()` ASLR-disable restriction lldb does (a
+  `warning: Error disabling address space randomization: Operation not
+  permitted` in the default config) but treats it as non-fatal and
+  proceeds, where lldb treats it as a hard launch failure.
+- Root cause of the lldb-server hang itself not yet identified — this is
+  now a separate, ongoing investigation (see DECISIONLOG.md's "Debugging:
+  lldb-server hangs..." entry), independent of the Rust work.
+
+Decision (fully reasoned in DECISIONLOG.md): flip c-mode/c++-mode/
+rust-mode/rustic-mode/rust-ts-mode all onto `gdb` exclusively. Clear
+`lldb-dap`/`lldb-vscode`'s `modes` entirely so `SPC d d` doesn't offer a
+silently-hanging option for any language here. `lldb` stays installed
+(small footprint; aarch64 lldb-server support may mature) but unoffered
+until the hang is root-caused. This reopens and revises both of last
+night's debugger DECISIONLOG entries — the reasoning in each was sound
+given what was known at the time; the new information is that lldb
+doesn't actually work on this host/arch at all, which neither entry had
+access to.
+
+**Verified live end-to-end after all three fixes**: `SPC d d` → select
+`gdb` → breakpoint on `c.inc();` → launch → correct stop at
+`flight_test::main` / `src/main.rs:17` → correct populated locals
+(`message "Hello"`, `c` present) — the real dape → DAP → gdb flow, not a
+simulated approximation of it. rust-analyzer hover, cross-file doc
+resolution, and `textDocument/completion` (struct fields, inherent
+methods, blanket-trait methods, postfix snippets) also confirmed live
+against the actual flight-test fixture, not just read from lsp-mode's
+source.
+
+**Not yet done**: none of this has been repeated against the x86_64
+tree's own build — the code changes were mirrored there, but the
+lldb-hang finding and the gdb verification are aarch64-only so far (see
+DECISIONLOG.md's caveat on that entry). The lldb-server hang itself
+remains unresolved; actively being investigated further.
+
+#### Follow-up, same day: the lldb hang was `DEBUGINFOD_URLS`, not the host/arch — reverted back to lldb for Rust
+
+The gdb-flip above turned out to be solving the wrong problem. `strace`
+(added to the image as a permanent apt package — routine enough to earn
+for systems work generally, not just this one investigation) on a
+hanging `lldb -b -o run -o quit` showed no `ptrace`/`personality`/`fork`
+call anywhere near the hang — lldb was still inside `target create`,
+parked in a socket poll loop on a TLS connection to
+`debuginfod.ubuntu.com`. Ubuntu's `/etc/profile.d/debuginfod.sh` sets
+`DEBUGINFOD_URLS` for every login shell; gdb explicitly prompts ("Enable
+debuginfod for this session?") and respects a non-interactive "no" —
+that's why gdb was never affected and why this looked, for a while, like
+an lldb-vs-gdb difference in behavior rather than what it actually was.
+lldb has no equivalent gate; it just tries the connection and blocks
+indefinitely.
+
+`DEBUGINFOD_URLS=""` fixed it completely: 0.2 seconds instead of a hang,
+full correct program output, clean exit — confirmed via raw CLI, a live
+daemon restart with the variable cleared, and the actual `SPC d d` ->
+dape -> lldb-dap DAP flow (breakpoint hit at the correct line, and a
+full accurate backtrace through Rust's runtime internals down to
+`_start`, more detail than gdb's stack view had shown).
+
+Fixed at the image level (`ENV DEBUGINFOD_URLS=""` in the Dockerfile, not
+per-debugger-config — it isn't a debugger-specific setting). This
+reverses this morning's gdb-flip entirely: `dape-config.el`'s `modes`
+overrides are removed, `rust-keybindings.el`'s comments and
+`rust-flight-test.md`'s Debug section are reverted back to lldb-dap.
+Only the `:program` "a.out" resolver stays, since that fix was always
+correct and unrelated to the debuginfod problem. Full reasoning
+(including why the privilege-level testing this morning wasn't wasted
+work — it correctly ruled out capabilities/seccomp/SELinux, it just
+hadn't yet checked environment variables) is in DECISIONLOG.md.
+
+Not yet done: x86_64 mirror applied (Dockerfile, dape-config.el,
+rust-keybindings.el, flight-test doc, DECISIONLOG.md, strace) but not
+independently verified there — same caveat as this morning's now-reverted
+gdb-flip, just resolved in the opposite direction.
+
+#### Same day, second follow-up: `DEBUGINFOD_URLS` wasn't the whole story — `personality set failed` came back
+
+Rebuilt the image with the `DEBUGINFOD_URLS` fix above and tested against
+the actual, unmodified `run.sh` (no extra Docker capabilities — none of
+the `--cap-add`/`--security-opt` flags from earlier privilege-level
+testing) — and hit `Cannot launch '.../flight-test': personality set
+failed: Operation not permitted`, the exact error this whole
+investigation started with. `DEBUGINFOD_URLS` was a real, necessary fix
+for a real, separate bug, but it was never the *only* problem — it just
+happened to be the first thing standing in the way once the earlier
+`--privileged` test container was already bypassing the second problem
+entirely, which made it invisible until testing against the real
+container configuration.
+
+Reproduced cleanly in a fresh daemon, in the exact zero-extra-capability
+container `run.sh` launches: `lldb-dap` hits the same `personality()`
+ASLR-disable denial gdb does (gdb just warns and proceeds; lldb-dap
+treats it as fatal). Two dead ends before finding the real fix: neither
+`~/.lldbinit`'s `settings set target.disable-aslr false` nor an
+`initCommands` DAP launch argument doing the same actually prevented the
+failure — both run too late, since lldb-dap's ASLR-disable happens inside
+its own launch-request handling before either fires. The actual fix:
+`:disableASLR nil`, lldb-dap's own dedicated DAP launch argument for
+this, added to `dape-config.el` alongside the `:program` resolver.
+Confirmed in the exact same zero-privilege container: clean launch,
+correct breakpoint stop, full accurate backtrace — no `run.sh` changes,
+no container capability/seccomp loosening, needed at all.
+
+Net result: lldb debugging works correctly in this image's actual,
+unmodified default container configuration, fixed by one Dockerfile `ENV`
+line and one dape config key — not a security tradeoff of any kind.
+DECISIONLOG.md's final entry on this now covers both causes together.
+x86_64 mirror applied; still not independently verified there.
+
+#### Open investigation, same day: lldb-dap runs straight past every breakpoint — a real dape/lldb-dap race condition, unresolved
+
+**Checkpoint written mid-investigation** (in case of context compaction) — this
+is not yet fixed. Status as of writing: a fresh breakpoint, correctly placed,
+gets silently ignored; the program always runs to completion instead of
+stopping. Confirmed via the actual `run.sh`-launched container
+(`doom-systems-ide-aarch64`), which was still running and directly
+inspectable via `emacsclient` — all diagnosis below happened live in that
+real session, not a throwaway container.
+
+**Ruled out, in order:**
+1. Stale/persisted breakpoints (`dape-breakpoint-global-mode` persists across
+   sessions) — found 3 real source breakpoints at 3 different lines (11, 17,
+   22) left over from earlier testing tonight, all at genuinely valid
+   executable-line locations. Cleared all, set exactly one fresh breakpoint —
+   still ran straight through. Not the cause.
+2. `run.sh`'s `INJECT_HOST_ENV` host-environment passthrough shadowing
+   something — retested with `INJECT_HOST_ENV=0`. Still broken. Not the
+   cause.
+3. `DEBUGINFOD_URLS`/`personality()` (the two bugs fixed above) — confirmed
+   fully resolved; no hang, no permission error, launch always completes
+   cleanly and quickly. Unrelated to this new problem.
+
+**Root cause, found via live JSON-RPC tracing**: `dape-connection` in this
+dape version is an EIEIO class wrapping `jsonrpc.el`, but dape explicitly
+disables jsonrpc's built-in events-buffer logging (`:size 0` in its
+`-events-buffer-config`), so there's no out-of-the-box protocol log to read.
+Worked around by live-advising `jsonrpc-connection-send` and
+`jsonrpc--log-event` into a scratch buffer (`*my-dape-trace*`) via
+`emacsclient --eval` against the user's live Emacs, then re-running the
+launch. This revealed the actual request sequence:
+
+```
+id 1: initialize
+id 2: launch          <-- sent immediately, right after initialize's response
+id 3: setExceptionBreakpoints
+id 4: setBreakpoints  <-- sent AFTER launch, too late
+id 5: setFunctionBreakpoints
+id 6: setDataBreakpoints
+id 7: configurationDone
+```
+
+Reading `dape.el`'s actual source (`svaante/dape`, fetched directly from
+GitHub) confirms this is a genuine **race condition in dape itself**, not a
+config mistake:
+- The `initialize` response handler sends `launch`/`attach`
+  **unconditionally** unless `defer-launch-attach` is set — with no
+  coordination to anything else.
+- `setBreakpoints`/`setExceptionBreakpoints`/`setFunctionBreakpoints`/
+  `setDataBreakpoints`/`configurationDone` only fire in response to a
+  **separate, independent** `initialized` *event* the adapter sends
+  whenever it decides it's ready — dape.el's `dape-handle-event` method for
+  the `initialized` symbol.
+
+These are two unsynchronized code paths. If the adapter emits `initialized`
+slower than dape processes the `initialize` response (a timing race, not a
+logic bug), `launch` wins and the program is already running before
+breakpoints arrive. This also explains why it reproduces 100% reliably in
+the user's real `run.sh` container but did *not* reproduce in this session's
+earlier throwaway test containers (`rust-verify`, `rust-verify-cap2`) using
+what should be identical commands — those containers are plain local Docker
+storage with less I/O overhead than the real container's several bind
+mounts (Nix store, Development/personal, ssh-agent, docker socket, etc.),
+plausibly enough timing difference to flip which side of the race wins.
+
+**`defer-launch-attach: t`** is dape's own documented, purpose-built
+mechanism for exactly this situation (its docstring cites "GDB bug 32090"
+as the origin) — gdb apparently doesn't need it here (works fine with the
+default `nil`, presumably because gdb internally holds off actually running
+until `configurationDone` regardless of when `launch` arrives, an
+adapter-side behavior dape can't control). Setting it to `t` for
+`lldb-dap`/`lldb-vscode` live (via the same `dape-configs` alist patch
+pattern as the `:program`/`:disableASLR` fixes) did **not** fix it — it
+caused a full stall instead: after `t` was set, a fresh launch sent only
+`initialize` and then nothing else at all, not even `setBreakpoints`, for
+at least 8+ seconds (well past when the untouched flow would have finished
+setting breakpoints and running). This means the `initialized`-event
+handler chain that should fire the setBreakpoints/configurationDone
+sequence didn't fire either — not just that launch was withheld correctly.
+Not yet understood why; this is the current open question.
+
+**Diagnostic technique worth remembering**: `jsonrpc-connection-send`/
+`jsonrpc--log-event` advice is the way to get real protocol traces out of
+dape despite its events-buffer logging being disabled by default. Cleaned
+up (advice removed, trace buffer killed, breakpoints/patches reverted) at
+the point this checkpoint was written — the user's live session should be
+back to a normal, un-instrumented state. `dape-config.el`'s
+`:disableASLR`/`:program` fixes remain in place (still fully working); no
+`defer-launch-attach` change has been committed to any file yet — that was
+tested only as a live, uncommitted patch.
+
+**GitHub issue search** (`svaante/dape`): no exact match found. Closest was
+issue #151 ("lldb-dap runs my program but it doesn't stop at breakpoints,"
+closed) — but that one's actual cause was missing `-g` debug info, which
+doesn't apply here (this image's binaries demonstrably have full DWARF
+info: hover, cross-file docs, and accurate multi-frame backtraces already
+confirmed working earlier tonight). Issue #293 ("configurationDone request
+sent despite adapter not supporting it," closed) is conceptually adjacent
+— dape's maintainer acknowledged a real spec-compliance gap around
+`configurationDone` there — but is a different specific bug (missing
+`supportsConfigurationDoneRequest` capability check, not applicable since
+lldb-dap's capabilities response does include
+`:supportsConfigurationDoneRequest t`). This looks like a legitimate,
+not-yet-reported dape/lldb-dap bug — worth an upstream issue once
+root-caused.
+
+**Resolved, same day**: `defer-launch-attach: t`'s stall turned out to point
+at the actual mechanism, even though it wasn't the fix itself. Re-reading
+dape.el's `initialized`-event handler alongside the `initialize`-response
+handler suggested a specific hypothesis: lldb-dap likely only emits the
+`initialized` event as a side effect of having already received `launch` --
+not independently, the way the "textbook" DAP interpretation assumes. With
+`defer-launch-attach: t`, dape withholds `launch` until after the
+`initialized`-triggered chain completes, which never happens if lldb-dap is
+gating `initialized` behind `launch` -- a genuine chicken-and-egg, matching
+the observed stall exactly.
+
+This reframes the problem: instead of trying to fix the *ordering* of
+`launch` vs `setBreakpoints`, sidestep the race's timing sensitivity
+entirely. lldb-dap's own documentation (`lldb.llvm.org/use/lldbdap.html`)
+confirms `stopOnEntry` as a supported launch argument, and dape.el already
+has precedent for passing it through for other adapters. Added
+`:stopOnEntry t` to `lldb-dap`/`lldb-vscode` in `dape-config.el`, keeping
+`defer-launch-attach` at its default (unset). With this, the process always
+pauses at its very first instruction, regardless of breakpoints -- giving
+the late-arriving `setBreakpoints` request as much time as it needs to
+register before anything resumes. **Verified live, twice, in the user's
+actual `run.sh` container**: launch stops at entry (`signal SIGSTOP`,
+frame in `ld-linux-aarch64.so.1`), one `dape-continue` reaches the real
+breakpoint correctly (`flight_test::main` / `src/main.rs:18` in the first
+run, `:17` after a clean rebuild fixed a stale-binary line-number mismatch
+in the second), with a full accurate backtrace both times.
+
+**UX cost, worth knowing**: every `SPC d d` now stops once at the process
+entry point before your own breakpoints are reachable -- `SPC d c` once to
+get past it. Small price for breakpoints working at all.
+
+**How the investigation actually ended**: while confirming this fix a
+third time for certainty, `emacsclient` calls stopped responding entirely.
+`ps aux` inside the container showed the main `emacs` process in state `R`
+(actively running, not blocked) with 16+ minutes of accumulated CPU time --
+genuinely spinning, not deadlocked on I/O -- alongside **five** separate
+`lldb-dap`/`lldb-server` process pairs still alive from earlier test
+launches that had never been cleanly disconnected, plausibly confusing
+dape's connection-selection logic into a busy loop. Attempted recovery via
+`kill -SIGINT` on PID 1 inside the container -- not realizing PID 1 *is*
+Emacs itself here (this image's `CMD` is `["emacs"]` directly, no separate
+init process) -- which terminated the entire container instead of just
+interrupting the stuck operation. All unsaved session state (any breakpoints
+not yet persisted, buffer state) was lost; the container needed a full
+`./run.sh` restart. The fix itself was already safely written to
+`dape-config.el` on disk before this happened, so no investigation work was
+lost -- only the live session state.
+
+**Lesson for next time**: never send signals to PID 1 inside a container
+without first confirming what PID 1 actually is in that specific image --
+`docker exec <container> cat /proc/1/comm` (or checking the Dockerfile's
+`CMD`) is a cheap, mandatory check before any signal-based recovery attempt,
+since PID 1 has no default signal handlers the way a normal process does
+and many images (this one included) run the actual application directly as
+PID 1 rather than under a supervisor.
+
+**Update**: DECISIONLOG.md now has the full entry for the race condition +
+`stopOnEntry` fix. The container was restarted via a fresh `./run.sh` and
+the fix was re-verified end-to-end against that clean start (see this
+file's own account above). Still not yet done: none of this has been
+tested on x86_64 (aarch64-only so far, same caveat as the rest of this
+debugging saga).
+
