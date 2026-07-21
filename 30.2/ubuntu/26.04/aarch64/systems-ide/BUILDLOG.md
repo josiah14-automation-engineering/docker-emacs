@@ -2007,3 +2007,62 @@ container this was tested against had `dape-config.el` reloaded live via
 `load-file` for verification, but its baked-in image still predates this
 change. A rebuild is needed before `SPC d d` picks this up by default in
 a fresh container.
+
+---
+
+#### Follow-up, same session: the Go fix wasn't the whole story -- gdb/lldb-dap/lldb-vscode had the identical bug
+
+Right after the Go/dlv fix above landed, a second look at Rust's own
+flight-test (previously confirmed working earlier this same session) now
+failed too, complaining about being unable to find its `Cargo.toml` --
+and C's gdb session, tested separately, showed the exact "No source file
+named .../main.c ... Breakpoint 1 ... pending" symptom from way back at
+the start of tonight's debugging (originally assumed, at the time, to be
+purely the missing-debug-symbols bug -- it wasn't only that).
+
+**Root cause, one layer deeper than the Go fix reached:** dape's
+`dape--guess-root` -- called to bind `default-directory` *before*
+`:program` gets evaluated for any config -- reads a config's own
+`command-cwd` first, falling back to `dape-command-cwd` only if unset.
+`gdb`/`lldb-dap`/`lldb-vscode`'s built-in configs all default `command-cwd`
+to `dape-command-cwd` too, exactly like `dlv` did. Fixing only `dlv`'s
+`command-cwd` left the other three routing through the same broken
+`project-current` chain -- but where Go's `dlv` has no `:program`
+resolver of its own and fails loudly ("cannot find main module"), gdb/
+lldb-dap's `+dape-cargo-program`/`+dape-cmake-program` resolvers just
+silently found no root either (their own internal
+`locate-dominating-file` calls, poisoned by the same wrong
+`default-directory`) and fell through to dape's literal `"a.out"`
+default -- a much quieter failure that read, at first glance, like a
+missing binary rather than a resolution bug.
+
+**Fix:** `dape-config.el` gains `+dape-resolve-cwd` (tries `Cargo.toml`,
+then `CMakeLists.txt`, same shape as `+dape-resolve-program`), applied as
+`command-cwd` for `gdb`/`lldb-dap`/`lldb-vscode` alongside the existing
+`:program` override. `+dape-go-root` stays as `dlv`'s own separate
+`command-cwd`, since Go's marker file is different and it has no
+`:program` resolver to share logic with.
+
+**Verified live, all three languages, in the docker-emacs repo's own
+nested flight-test copies** (not the `~/flight-tests/` image-baked
+copies, which never hit this since they're not nested inside a larger
+git tree):
+- Go: `dlv` build succeeds from `flight-tests/go/`, breakpoint stops with
+  `message` populated (already covered above).
+- Rust: `lldb-dap` launches `flight-tests/rust/target/debug/flight-test`
+  correctly, `:stopOnEntry` pause then `dape-continue` reaches
+  `flight_test::main` / `src/main.rs:17` with `message`/`c` populated.
+- C: `gdb` resolves `flight-tests/c/build/ctest` correctly, breakpoint on
+  `print_greeting(&g);` stops with `unused 42`/`g` populated. (The
+  "Breakpoint 1 ... pending" message still prints during the request
+  race -- gdb warns and self-heals once the binary loads, same
+  warn-and-proceed character as its ASLR/`personality()` behavior
+  documented in DECISIONLOG.md -- but the breakpoint now resolves
+  correctly instead of staying pending forever with no binary to attach
+  to.) Confirmed independently by re-testing both gdb and lldb-dap
+  against the C fixture after this fix.
+
+Only verified on aarch64 so far; x86_64 mirrors the same fix but hasn't
+been independently confirmed against its own rebuilt image. Same
+not-yet-rebuilt caveat as the entry above -- this was verified via
+`load-file` into the running daemon, not a fresh container boot.

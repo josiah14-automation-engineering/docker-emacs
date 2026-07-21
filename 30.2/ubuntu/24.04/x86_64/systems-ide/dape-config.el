@@ -62,21 +62,52 @@ anything else (e.g. a bare `cc foo.c')."
       (setf (alist-get name dape-configs)
             (plist-put config :program #'+dape-resolve-program))))
 
-  ;; dape's built-in `dlv' config launches delve with `:program "."'/
-  ;; `:cwd "."' -- both resolved by delve itself relative to the *adapter
-  ;; process's own* working directory, i.e. `command-cwd', which defaults
-  ;; to `dape-command-cwd' -> `project-current'. Doom prepends
+  ;; dape's own default `command-cwd' (`dape-command-cwd' -> `project-current')
+  ;; determines two things, not just one: it's both the adapter process's
+  ;; own working directory AND -- via `dape--guess-root', called *before*
+  ;; `:program' gets evaluated, to bind `default-directory' for that whole
+  ;; evaluation -- what every function-valued config entry above sees too,
+  ;; including `+dape-resolve-program' itself. Doom prepends
   ;; `project-projectile' ahead of project.el's own VC backend in
-  ;; `project-find-functions', and `projectile-project-root-files-bottom-up'
-  ;; has no `go.mod' entry -- so a Go module nested inside this repo's own
-  ;; git tree (e.g. flight-tests/go/) resolves to the outer git root
-  ;; instead, and `go build .' fails there with "cannot find main module".
-  ;; Same class of bug as +cmake--root; same fix shape: walk up for the
-  ;; real marker file directly instead of trusting project/projectile.
+  ;; `project-find-functions', and neither
+  ;; `projectile-project-root-files-bottom-up' nor project.el's own
+  ;; `project-vc-extra-root-markers' (tried and confirmed to make no
+  ;; difference -- `project-projectile' wins the race before project.el's
+  ;; VC backend ever runs) know about `Cargo.toml'/`CMakeLists.txt'/
+  ;; `go.mod'. Any project nested inside this repo's own git tree (every
+  ;; flight-test fixture here, by construction) resolves to the outer git
+  ;; root instead.
+  ;;
+  ;; This broke gdb/lldb-dap/lldb-vscode too, not just `dlv' -- it just
+  ;; broke *quietly* there: `+dape-cargo-program'/`+dape-cmake-program's
+  ;; own `locate-dominating-file' calls got silently poisoned by the wrong
+  ;; `default-directory' and fell through to dape's literal "a.out"
+  ;; default instead of erroring, so it went unnoticed until Rust's own
+  ;; flight-test started failing with a Cargo.toml-not-found symptom on a
+  ;; second look -- Go's `dlv' (no `:program' resolver of its own to mask
+  ;; it, and delve's own `go build' error is loud) is what surfaced the
+  ;; underlying bug first, but fixing only its `command-cwd' left the
+  ;; other three configs exposed to the exact same root cause.
+  ;;
+  ;; Fix, same shape for all four: walk up for the real marker file
+  ;; directly, bypassing project/projectile entirely rather than trying
+  ;; to fix root detection globally, same as the `:program' resolvers.
+  (defun +dape-resolve-cwd ()
+    "Directory containing the nearest Cargo.toml or CMakeLists.txt.
+Falls back to dape's own guess for anything else."
+    (or (locate-dominating-file default-directory "Cargo.toml")
+        (locate-dominating-file default-directory "CMakeLists.txt")
+        (dape-command-cwd)))
+
   (defun +dape-go-root ()
     "Directory containing the nearest go.mod, or dape's own guess as fallback."
     (or (locate-dominating-file default-directory "go.mod")
         (dape-command-cwd)))
+
+  (dolist (name '(gdb lldb-dap lldb-vscode))
+    (when-let* ((config (alist-get name dape-configs)))
+      (setf (alist-get name dape-configs)
+            (plist-put config 'command-cwd #'+dape-resolve-cwd))))
 
   (when-let* ((config (alist-get 'dlv dape-configs)))
     (setf (alist-get 'dlv dape-configs)
