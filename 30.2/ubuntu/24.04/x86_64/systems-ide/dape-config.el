@@ -145,7 +145,61 @@ Falls back to dape's own guess for anything else."
   (dolist (name '(lldb-dap lldb-vscode))
     (when-let* ((config (alist-get name dape-configs)))
       (setf (alist-get name dape-configs)
-            (plist-put config :stopOnEntry t)))))
+            (plist-put config :stopOnEntry t))))
+
+  ;; dape has no built-in Lua config -- unlike gdb/lldb-dap/dlv/debugpy,
+  ;; nothing here is patching an existing entry. `local-lua-debugger-vscode'
+  ;; (tomblind) was picked over `actboy168/lua-debug' (more capable, but no
+  ;; real prebuilt-binary distribution -- its GitHub Releases page has been
+  ;; empty since 2019, and building it needs a custom `luamake' toolchain
+  ;; and submodule deps, exactly the kind of fragile from-source build this
+  ;; project avoids elsewhere) -- this one is pure TypeScript/Node with a
+  ;; single runtime dependency (`vscode-debugadapter'), a normal, boring
+  ;; `npm install && npm run build' (Dockerfile), no native compilation.
+  ;;
+  ;; Its debug adapter (`extension/debugAdapter.js') is a plain stdio DAP
+  ;; server, same shape as gdb/lldb-dap -- launched directly via
+  ;; `command'/`command-args', no socket/port needed. Two things it needs
+  ;; that a normal VS Code install would supply automatically and silently:
+  ;; - `:extensionPath': not derived by the adapter itself -- it's expected
+  ;;   directly in the launch config (VS Code's extension host injects its
+  ;;   own install dir before forwarding the config; going straight to
+  ;;   debugAdapter.js like this bypasses that, so it has to be supplied by
+  ;;   hand). Without it, `extensionPath' is literally the string
+  ;;   "undefined" in the constructed require path -- confirmed live, the
+  ;;   Lua-side `require('lldebugger')' fails with "no file
+  ;;   'undefined/debugger/lldebugger.lua'".
+  ;; - `:program' is a *nested* plist here (`:lua'/`:file'), not a bare
+  ;;   string like every other config in this file -- this adapter's own
+  ;;   launch schema, not a dape convention.
+  ;;
+  ;; `:file'/`:cwd' deliberately don't reuse `dape-buffer-default'/
+  ;; `dape-cwd' (both ultimately root-cause back to the same broken
+  ;; `project-current' chain fixed above for gdb/lldb-dap/dlv) or a
+  ;; `+dape-resolve-cwd'-style marker-file walk -- a Lua script being
+  ;; debugged here rarely has a project manifest to anchor a root search on
+  ;; in the first place (this project's own Lua flight-test doesn't).
+  ;; `buffer-file-name' is simpler and immune to the whole class of bug:
+  ;; `current-buffer' is never rebound by `dape--guess-root', only
+  ;; `default-directory' is, so an absolute path straight from the buffer
+  ;; itself sidesteps the problem entirely rather than working around it.
+  (defun +dape-lua-file ()
+    "Absolute path to the current buffer's file."
+    (buffer-file-name))
+
+  (defun +dape-lua-cwd ()
+    "Directory containing the current buffer's file."
+    (file-name-directory (buffer-file-name)))
+
+  (setf (alist-get 'lua-local dape-configs)
+        (list 'modes '(lua-mode)
+              'command "node"
+              'command-args (list (expand-file-name "~/.local/lib/local-lua-debugger-vscode/extension/debugAdapter.js"))
+              :type "lua-local"
+              :request "launch"
+              :program (list :lua "lua" :file #'+dape-lua-file)
+              :cwd #'+dape-lua-cwd
+              :extensionPath (expand-file-name "~/.local/lib/local-lua-debugger-vscode"))))
 
 (provide 'dape-config)
 ;;; dape-config.el ends here

@@ -41,6 +41,7 @@ ARG LUA_LANGUAGE_SERVER_VERSION=3.18.2
 ARG LUA_LANGUAGE_SERVER_SHA256=ca71415dd19f19e30aaa35a4915aefca9fdb5fec31b98331cc3d77f778d539c5
 ARG STYLUA_VERSION=2.5.2
 ARG STYLUA_SHA256=bcb0d855e91f102f28a370e850f8566b3b44b79e6274d806ea5246837c0fd5ab
+ARG LOCAL_LUA_DEBUGGER_VERSION=release-0.3.3
 ARG RUFF_VERSION=0.15.22
 ARG RUFF_SHA256=d535a4be6504146e757eff67b992f11a293a7a108be22e2a5898b32c32565996
 ARG RUST_VERSION=1.97.1
@@ -475,6 +476,34 @@ RUN curl -fsSL "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STY
     && chmod +x /home/${USERNAME}/.local/bin/stylua \
     && rm /tmp/stylua.zip
 
+# local-lua-debugger-vscode (tomblind) -- dape's debugger for lua-mode
+# (dape-config.el; no built-in dape config for Lua, unlike gdb/lldb-dap/
+# dlv/debugpy). Picked over actboy168/lua-debug -- more capable, but its
+# GitHub Releases page has been empty since 2019 (no prebuilt binaries)
+# and building it needs a custom `luamake' toolchain plus submodule
+# deps, exactly the fragile from-source build this project avoids
+# elsewhere. This one is pure TypeScript/Node with one runtime
+# dependency (vscode-debugadapter) -- a normal `npm install && npm run
+# build', no native compilation. No published checksum for a git-tag
+# clone the way release binaries have one; pinned to an exact tag
+# instead (--depth 1 --branch), same as zshdb above.
+#
+# `npm install --omit=dev' after building strips the build-only deps
+# (typescript, typescript-to-lua, eslint, vsce) -- confirmed live that
+# skipping this step still leaves a working debugger (they're never
+# `require'd at runtime), just a much larger node_modules copied in for
+# nothing.
+RUN git clone --depth 1 --branch "${LOCAL_LUA_DEBUGGER_VERSION}" https://github.com/tomblind/local-lua-debugger-vscode.git /tmp/lldbg-src \
+    && cd /tmp/lldbg-src \
+    && npm install \
+    && npm run build-debugger \
+    && npm run build-extension \
+    && rm -rf node_modules \
+    && npm install --omit=dev \
+    && mkdir -p /home/${USERNAME}/.local/lib/local-lua-debugger-vscode \
+    && cp -r extension debugger node_modules /home/${USERNAME}/.local/lib/local-lua-debugger-vscode/ \
+    && rm -rf /tmp/lldbg-src
+
 # ruff is a single self-contained binary (Rust), used for both linting
 # (flycheck's built-in python-ruff checker, no separate package needed)
 # and formatting -- overriding apheleia's own default of `black` for
@@ -518,8 +547,11 @@ COPY --chown=${USERNAME}:${USERNAME} zig-keybindings.el    /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} cmake-keybindings.el  /home/${USERNAME}/.config/doom/cmake-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} docker-keybindings.el /home/${USERNAME}/.config/doom/docker-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} lua-keybindings.el    /home/${USERNAME}/.config/doom/lua-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} lua-config.el         /home/${USERNAME}/.config/doom/lua-config.el
 COPY --chown=${USERNAME}:${USERNAME} python-keybindings.el /home/${USERNAME}/.config/doom/python-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} python-config.el      /home/${USERNAME}/.config/doom/python-config.el
 COPY --chown=${USERNAME}:${USERNAME} ruby-keybindings.el   /home/${USERNAME}/.config/doom/ruby-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} ruby-config.el        /home/${USERNAME}/.config/doom/ruby-config.el
 COPY --chown=${USERNAME}:${USERNAME} javascript-keybindings.el /home/${USERNAME}/.config/doom/javascript-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} typescript-keybindings.el /home/${USERNAME}/.config/doom/typescript-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} nix-keybindings.el    /home/${USERNAME}/.config/doom/nix-keybindings.el
