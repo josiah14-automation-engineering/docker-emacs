@@ -1165,3 +1165,106 @@ as-is: it's only a problem for whichever container is the one bridging
 is systems-ide's role here, not logic-ide's — fixing the one script that
 actually needs to compose with nesting is the root-cause fix, not
 propagating the same change everywhere on principle.
+
+#### Lua added as a seventh full-support language
+
+Following a design discussion about scope: systems-ide isn't meant to be a
+weaker `python-doom-emacs-ide`-style application-development IDE for
+these languages, it's meant to be tailored to how a systems engineer
+actually encounters them — isolated config/glue scripts embedded in
+someone else's project, not a project of systems-ide's own. Lua gets
+**full** support rather than the glue-script tier, though, matching the
+original project plan's own reasoning (`README.md`'s new "Language
+grouping philosophy" section, added this session, documents this split):
+Lua configuration in window managers/Neovim/Redis/nginx is deep and
+non-trivial enough that syntax-only would leave real value on the table.
+
+**Doom's own `:lang lua +lsp` module does almost all of the work.**
+Confirmed by reading it directly rather than assumed: it already wires
+`lua-mode`'s interpreter detection (`\<lua(?:jit)?`), a REPL via
+`set-repl-handler!` (reachable through `:tools eval`'s global `M-r` →
+`+eval/buffer`, no custom binding needed), automatic LSP attachment via
+the mode's own local-vars-hook once `+lsp` is enabled, and — per Doom's
+own module README — format-on-save via StyLua through the already-active
+`:editor format` module. `lua-keybindings.el` ended up needing almost no
+custom code: one on-demand `lsp-format-buffer` binding (`SPC m f`),
+matching `c-keybindings.el`'s exact same rationale (format-on-save
+existing doesn't make an on-demand format command redundant), plus a
+Commentary block documenting what Doom already provides for free.
+
+**Two binaries needed manual installation, one interpreter from apt:**
+- `lua5.4` (apt, both distros — `5.4.8-1build1` resolute/arm64,
+  `5.4.6-3build2` noble/amd64). No bare `lua` symlink ships with Debian's
+  versioned lua packages (deliberate, so multiple versions can coexist);
+  `lua-mode`'s own interpreter-detection regex expects a bare `lua`/
+  `luajit` name, so one is created explicitly
+  (`ln -s /usr/bin/lua5.4 /usr/local/bin/lua`).
+- `lua-language-server` 3.18.2, prebuilt Linux release binaries (arm64/
+  x64), SHA256 computed directly from the downloaded artifacts rather
+  than trusted from an upstream checksum file — neither this release nor
+  StyLua's publishes one, unlike Go's/NFM's already-published hashes
+  elsewhere in this Dockerfile. Ships as a whole directory tree (`bin/`,
+  `locale/`, `main.lua`, ...), not a single relocatable binary — confirmed
+  from the actual tarball listing before assuming a single-binary
+  `install -m 755` copy (the pattern used for Go/NFM) would work; it
+  wouldn't have, `bin/lua-language-server` depends on the sibling
+  `main.lua`/`locale/` paths at fixed relative locations, so the whole
+  archive is extracted intact to `/usr/local/lib/lua-language-server/`.
+- `stylua` 2.5.2, prebuilt Linux release binary (aarch64/x86_64, non-musl
+  variant matching Ubuntu's glibc rather than the musl build meant for
+  Alpine). Single self-contained Rust binary — no Rust toolchain needed
+  to install it, same reasoning as `nu`'s own prebuilt-tarball install.
+
+**`lsp-clients-lua-language-server-bin` set explicitly in `config.el`**
+rather than relying on `lsp-mode`'s own default install-directory
+convention. Checked `lsp-mode`'s actual source for this rather than
+trusting Doom's `:lang lua` module README, which describes an older
+`$EMACSDIR/.local/etc/lsp/` convention — current `lsp-mode` (`clients/
+lsp-lua.el`, `lsp-mode.el`) actually defaults to `$EMACSDIR/.cache/lsp/`,
+a real, confirmed discrepancy between the README's documentation and the
+actual dependency's current behavior. Rather than gamble on which
+default is correct for the pinned Doom/lsp-mode commit this project
+actually uses, the binary is installed to a fixed path this project
+controls entirely (`/usr/local/lib/lua-language-server/bin/lua-language-
+server`) and pointed at explicitly — the same "don't bet on a moving
+default, be explicit" reasoning already applied to `lsp-auto-guess-root`
+and `docker-command` elsewhere in this same file.
+
+**Testing**: `smoketest.bats` gained a `test.lua` fixture, an install
+check for all three tools (asserting the pinned `lua-language-server`/
+`stylua` versions specifically, matching the regression-guard convention
+already used for `gopls`/`dlv`/`golangci-lint`), `.lua` → `lua-mode`
+activation, an LSP-load check, and the format-buffer keybinding
+resolution check. 51 `@test` cases now (was 47). Confirmed every `.el`
+file touched this session (`config.el`, `init.el`, `lua-keybindings.el`)
+parses cleanly via `emacs-lisp-mode`'s `check-parens` — not
+`fundamental-mode`'s, which produced false positives on ordinary
+apostrophes earlier this same log for exactly this reason. Confirmed
+`lua-keybindings.el` already had its Dockerfile `COPY` line (it's a
+placeholder scaffolded at project start, unlike `docker-keybindings.el`
+earlier this session, which was newly created and genuinely missing
+one) — checked directly rather than assumed, after getting burned by
+exactly that gap once already.
+
+**Bug found on first real build attempt: `ln: Permission denied`** on the
+`lua` symlink step. All three lua install `RUN` steps were placed after
+`USER ${USERNAME}` (line 233) — this Dockerfile switches to the non-root
+runtime user partway through, and everything after that point only has
+write access within its own `$HOME`. `/usr/local/bin`/`/usr/local/lib`
+are root-owned; the apt packages and the Go tarball earlier in this file
+never hit this because they run *before* the `USER` switch, as root.
+`vcpkg`/`conan`/`nupm`, added the same session as the C/CMake work,
+already follow the correct pattern (installed under
+`/home/${USERNAME}/...`) — the lua steps were the one exception, added
+without checking where they'd land relative to that switch. Fixed by
+moving all three installs under the runtime user's own `~/.local/`
+(`~/.local/bin/lua`, `~/.local/bin/stylua`, `~/.local/lib/lua-language-
+server/`) — `~/.local/bin` was already on `PATH` (see the `ENV PATH` line
+earlier in this file), so no new `PATH` entry was needed. `config.el`'s
+`lsp-clients-lua-language-server-bin` and `smoketest.bats`'s version
+check both updated to match, using `(expand-file-name "~/...")`/`$HOME`
+respectively rather than a literal username, so neither depends on the
+runtime user's exact name. Not yet verified end-to-end against a
+rebuild with this fix in place; pending Josiah's next rebuild attempt.
+
+---

@@ -53,6 +53,7 @@
        emacs-lisp
        (go +lsp)
        json
+       (lua +lsp)
        markdown
        (nix +lsp)
        org

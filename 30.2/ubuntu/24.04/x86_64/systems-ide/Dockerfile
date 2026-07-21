@@ -35,6 +35,10 @@ ARG NU_VERSION=0.114.1
 ARG NU_SHA256=8802b26edcdf1a64477567b5ce909fbae3d72d731c8f0847892ea16c6fa73c53
 ARG CMAKE_LANGUAGE_SERVER_VERSION=0.1.11
 ARG CONAN_VERSION=2.30.0
+ARG LUA_LANGUAGE_SERVER_VERSION=3.18.2
+ARG LUA_LANGUAGE_SERVER_SHA256=273af33f26f4a1143f27c96d9f9e1188aba619c71e0807042134f66b4bd27f24
+ARG STYLUA_VERSION=2.5.2
+ARG STYLUA_SHA256=0ef2ebf0b7e5a652b65c4cb96c6d9ffb3981a98547de3c764465bbf54a8d761a
 ARG VCPKG_VERSION=2026.06.24
 ARG NUPM_COMMIT=9a28419bf91aadc58999d83e0f6ef8d9dbfa7d9f
 ARG DEBIAN_FRONTEND=noninteractive
@@ -166,6 +170,10 @@ RUN apt-get update -y && \
       `# avoids duplicating potentially many-GB image/container state.` \
       docker.io \
       podman \
+      `# --- lua ide ---` \
+      `# lua-language-server and stylua are prebuilt release binaries,` \
+      `# installed below -- only the interpreter itself comes from apt.` \
+      lua5.4 \
       `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
@@ -324,6 +332,44 @@ RUN mkdir -p /home/${USERNAME}/.config/nushell/nupm \
     && nu -c "use /home/${USERNAME}/.cache/nupm-src/nupm; nupm install /home/${USERNAME}/.cache/nupm-src --force --path --no-confirm" \
     && rm -rf /home/${USERNAME}/.cache/nupm-src \
     && echo '$env.NU_LIB_DIRS = ($env.NU_LIB_DIRS? | default [] | append (\"/home/'"${USERNAME}"'/.config/nushell/nupm/modules\" | path expand))' >> /home/${USERNAME}/.config/nushell/env.nu
+
+# lua5.4 (apt) is only the interpreter -- lua-mode's REPL/execute-buffer
+# handling shells out to whatever's on PATH matching lua(?:jit)?, and the
+# apt package doesn't provide a bare `lua` symlink (Debian/Ubuntu keep
+# versioned lua interpreters installable side by side on purpose).
+#
+# Installed under the runtime user's own $HOME rather than /usr/local --
+# unlike the apt packages and Go tarball earlier in this file (which run
+# before the `USER ${USERNAME}` switch, as root), everything from vcpkg
+# onward in this file runs *after* that switch, so it only has write
+# access within its own home directory. vcpkg/conan/nupm already follow
+# this (installed under /home/${USERNAME}/...); ~/.local/bin is already
+# on PATH (see the ENV PATH line above), so no new PATH entry is needed.
+RUN mkdir -p /home/${USERNAME}/.local/bin \
+    && ln -s /usr/bin/lua5.4 /home/${USERNAME}/.local/bin/lua
+
+# lua-language-server ships as a self-contained directory tree (bin/,
+# locale/, main.lua, ...), not a single relocatable binary -- the archive
+# has to be extracted whole, not just the binary copied out. Installed to
+# a fixed, explicit path and wired via `lsp-clients-lua-language-server-bin`
+# in config.el rather than relying on lsp-mode's own default install-dir
+# convention (a `.cache/lsp/` path under $EMACSDIR that shifts across
+# lsp-mode versions) -- explicit here is more robust than betting on
+# hitting a moving default correctly.
+RUN curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/${LUA_LANGUAGE_SERVER_VERSION}/lua-language-server-${LUA_LANGUAGE_SERVER_VERSION}-linux-x64.tar.gz" -o /tmp/lua-ls.tar.gz \
+    && echo "${LUA_LANGUAGE_SERVER_SHA256}  /tmp/lua-ls.tar.gz" | sha256sum -c - \
+    && mkdir -p /home/${USERNAME}/.local/lib/lua-language-server \
+    && tar -C /home/${USERNAME}/.local/lib/lua-language-server -xzf /tmp/lua-ls.tar.gz \
+    && rm /tmp/lua-ls.tar.gz
+
+# stylua is a single self-contained binary (Rust) -- no Rust toolchain
+# needed to install it, matching the nu/vcpkg precedent of pulling a
+# prebuilt release rather than building from source for a one-binary tool.
+RUN curl -fsSL "https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64.zip" -o /tmp/stylua.zip \
+    && echo "${STYLUA_SHA256}  /tmp/stylua.zip" | sha256sum -c - \
+    && unzip -q /tmp/stylua.zip -d /home/${USERNAME}/.local/bin \
+    && chmod +x /home/${USERNAME}/.local/bin/stylua \
+    && rm /tmp/stylua.zip
 
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 

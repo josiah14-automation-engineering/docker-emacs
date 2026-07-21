@@ -31,6 +31,9 @@ EOF
 #!/usr/bin/env bash
 echo hi
 EOF
+  cat > /tmp/smoketest/test.lua <<'EOF'
+print("hi")
+EOF
   cat > /tmp/smoketest/test.zsh <<'EOF'
 #!/bin/zsh
 echo hi
@@ -194,6 +197,17 @@ eval_elisp() {
   [ "$status" -eq 0 ]
 }
 
+@test "lua, lua-language-server, and stylua are installed" {
+  run lua -v
+  [ "$status" -eq 0 ]
+  run "${HOME}/.local/lib/lua-language-server/bin/lua-language-server" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "3.18.2" ]]
+  run stylua --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "2.5.2" ]]
+}
+
 @test "opening a .bash file activates sh-mode with the bash dialect" {
   # sh-mode is the only major mode for shell scripts; bash vs zsh is tracked
   # by the buffer-local sh-shell variable, not a separate major mode (this is
@@ -312,6 +326,18 @@ eval_elisp() {
   [[ "$output" =~ "t" ]]
 }
 
+@test "opening a .lua file activates lua-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.lua") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "lua-mode" ]]
+}
+
+@test "lsp-mode loads when a lua-mode buffer is opened ((lua +lsp))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.lua") (featurep (quote lsp-mode)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
 @test "dape's built-in gdb debug config covers c-mode/c++-mode (:tools debugger)" {
   run eval_elisp '(progn (require (quote dape)) (let ((modes (plist-get (alist-get (quote gdb) dape-configs) (quote modes)))) (list (memq (quote c-mode) modes) (memq (quote c++-mode) modes))))'
   [ "$status" -eq 0 ]
@@ -375,6 +401,12 @@ eval_elisp() {
 
 @test "c localleader keybindings resolve (format buffer)" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "lsp-format-buffer" ]]
+}
+
+@test "lua localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.lua") (key-binding (kbd "SPC m f")))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "lsp-format-buffer" ]]
 }

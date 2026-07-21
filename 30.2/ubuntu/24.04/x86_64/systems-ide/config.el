@@ -73,7 +73,17 @@
   ;; that prompt also wedges every other emacsclient connection until it's
   ;; answered -- fatal for the daemon-driven smoketest flow. Auto-accepting
   ;; the guessed root avoids the prompt entirely.
-  (setq lsp-auto-guess-root t))
+  (setq lsp-auto-guess-root t)
+  ;; lsp-mode's own default install path for lua-language-server is a
+  ;; `.cache/lsp/` directory under $EMACSDIR that has shifted convention
+  ;; across lsp-mode versions -- pointed explicitly at this image's fixed
+  ;; install location instead of betting on hitting the current default
+  ;; correctly. The `main.lua` sibling and `locale/` directory (main.lua's
+  ;; expected relative to the install-dir root, not the binary) come along
+  ;; for free since the whole release archive was extracted as a tree,
+  ;; not just this one binary copied out.
+  (setq lsp-clients-lua-language-server-bin
+        (expand-file-name "~/.local/lib/lua-language-server/bin/lua-language-server")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; load language configs and keybindings
@@ -87,6 +97,7 @@
 (load! "go-keybindings")
 (load! "nix-keybindings")
 (load! "bats-keybindings")
+(load! "lua-keybindings")
 (load! "nu-keybindings")
 (load! "c-keybindings")
 (load! "cmake-keybindings")

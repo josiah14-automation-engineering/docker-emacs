@@ -2,6 +2,49 @@
 
 Personal Doom Emacs IDE images for multiple languages, built on Docker. Each image is a fully compiled Emacs with a language-specific Doom configuration baked in — ready to run as a GUI or console IDE.
 
+## Language grouping philosophy
+
+Each IDE image groups languages by what a *project* in that domain actually needs
+together, not by superficial language similarity. Two ends of a spectrum:
+
+- **logic-ide** (Prolog + Mercury): the simple case. A logic-programming project
+  rarely mixes in other languages, so one IDE per language family maps cleanly to one
+  kind of project.
+- **systems-ide**: the complex case, deliberately. Systems engineering work doesn't
+  mean "one project using many systems languages together" — it means routinely
+  encountering a wide diversity of otherwise-unrelated single-purpose scripts and
+  configs, each usually a lone file living inside someone else's project (a Chef
+  recipe here, a window manager config there), not a project of systems-ide's own.
+
+### systems-ide's per-language scope
+
+Deliberately narrower than "develop applications in this language" for most of its
+languages:
+
+- **Full IDE support** (LSP, debugger where one exists): languages a systems engineer
+  actually *writes* nontrivial logic in as part of systems work — C/C++/CMake, Go,
+  Rust, Nix, Shell, Bats, Nushell, and (in progress or planned) Lua, Zig, Guile. Lua
+  gets full support rather than the glue-script tier below specifically because of how
+  deeply and non-trivially it's embedded in the tools that use it for configuration
+  (window managers, Neovim, Redis, nginx) — a shallow syntax-only mode would leave too
+  much of that on the table.
+- **Glue-script tier** (LSP still on, no toolchain/debugger installed): languages a
+  systems engineer mostly *reads and lightly edits* as isolated config/automation
+  scripts embedded in someone else's project, rather than develops full applications
+  in — e.g. Ruby for Chef recipes rather than Rails apps, Python for window-manager/DE
+  config scripting and one-off Fabric tasks rather than framework development.
+  Enabling LSP here even without a project manifest present is still worth it: modern
+  language servers handle a lone file in an inferred single-file project mode just
+  fine for anything that stays within the standard library, which is most of what a
+  config/glue script actually is. The value only degrades for the specific
+  third-party imports a real project's dependency manifest would otherwise resolve.
+- **Full "develop applications in this language" support belongs to its own dedicated
+  IDE**, not systems-ide's glue-script tier — see the existing `python-doom-emacs-ide`
+  in the image table below. Whether JavaScript eventually gets a similar dedicated
+  "web programming" IDE alongside Ruby/Python/other web-server languages, versus
+  staying in systems-ide's glue-script tier for things like GNOME Shell extension
+  scripting, is an open question for later.
+
 ## Images
 
 Each Emacs version/OS combination has a **dev** image (compiles Emacs from source) and one or more **IDE** images built on top of it.
