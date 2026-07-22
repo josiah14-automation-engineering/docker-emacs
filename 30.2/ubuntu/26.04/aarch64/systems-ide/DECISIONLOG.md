@@ -549,3 +549,198 @@ against this repo's own nested copies. Only verified on aarch64 so far.
 with the same nested-manifest shape) is ever opened in one of these
 containers and the closest-match behavior turns out to be wrong for it
 in practice.
+
+---
+
+## Guile's Guile comes from a standalone `guix-source` image, not plain apt
+
+**Date:** 2026-07-21
+**Status:** Active
+
+**Decision:** `systems-ide` gets `guile` (and `guix`) via
+`COPY --from=guix-source`, a new standalone image, rather than
+`apt-get install guile-3.0`.
+
+**Rationale:** Initial recommendation was plain apt: Ubuntu's
+`guile-3.0` (3.0.11-2) and Guix 1.5.0's own bundled Guile (3.0.9,
+confirmed live) are close enough in version that a version-freshness
+argument for the Guix-sourced route seemed weak, and plain apt avoids
+extra image-build complexity. **Reversed after being directly
+challenged on it:** is version parity actually guaranteed to hold, or
+is it a coincidental snapshot? It's the latter -- Ubuntu freezes apt
+packages at release time; Guix keeps moving forward with each release.
+More importantly, the actual intended use is working with Guix's own
+package/channel definitions through Geiser, which needs Guix's own
+Guile module load path, not just a version-matched but otherwise
+unrelated apt binary. Guix's own historical Guile-version maintenance
+is also solid (promptly adopted the 2.2→3.0 transition in 2020, keeps
+shipping point-release bumps) -- not a stale or neglected dependency to
+avoid coupling to.
+
+**A second reversal, this one self-corrected before implementation:**
+assumed getting `guile` out of the tarball would need a transient
+`guix-daemon` running during the image build (`guix install guile`),
+the single riskiest, least-precedented step originally planned for this
+work. Verified live it isn't needed at all: Guix is itself implemented
+in Guile, so a full Guile closure is already a transitive dependency of
+the `guix` package sitting in the store right after plain tarball
+extraction -- it's just not symlinked into `guix`'s own profile `bin/`
+by default. A build-time-discovered symlink is all that's needed; no
+daemon, no `guix install`, at build time at all.
+
+**Revisit if:** a future Guix release changes its own Guile version in
+a way that breaks Geiser/geiser-guile compatibility, or the manual
+symlink-discovery approach breaks against some future Guix release's
+store layout.
+
+---
+
+## Guix daemon architecture: in-container, not bridged to a host daemon
+
+**Date:** 2026-07-21
+**Status:** Superseded 2026-07-22 -- see "Guix daemon architecture:
+host-bridged by default, in-container as a toggle" below. The
+either/or framing here was itself a mistake, corrected directly by the
+user: `MOUNT_HOST_NIX` already proves (for Nix, elsewhere in this same
+file) that host-bridged and self-contained aren't mutually exclusive
+architectures, just two ends of one runtime toggle. Everything below
+about the sandbox-capability flags and the `sudo`/`secure_path` bug
+still applies unchanged to the self-contained fallback path.
+
+**Decision:** `systems-ide` runs its own `guix-daemon` as a background
+process at container *runtime* (new `entrypoint.sh`), rather than
+bridging to a `guix-daemon` running on the host or in a sidecar
+container.
+
+**Rationale:** Original design modeled this on the existing
+Docker/Podman client-bridge pattern already in this project (client
+only in the container, daemon lives outside, `run.sh` bridges via a
+socket). **Reversed when the user pointed out the actual failure
+mode:** unlike Nix (fully self-contained -- packages are baked into
+`/nix` at build time via single-user `--no-daemon` mode, so the running
+container never depends on any daemon being reachable) or Docker/Podman
+(bridging to an external daemon is the entire point -- avoiding
+Docker-in-Docker), a Guix host-daemon bridge would make `systems-ide`'s
+Guix functionality entirely dependent on an external `guix-daemon`
+staying reachable, with zero in-container fallback if it isn't -- a
+real resilience regression against every other package manager this
+project supports, not a minor gap. Running the daemon inside the
+container instead sidesteps the actual constraint that motivated the
+bridge design in the first place: "can't fork a persisting daemon
+during a Docker `RUN` layer" is a constraint on `docker build`, not on
+an already-running container, so there was never a real reason Guix
+needed the bridge architecture Docker/Podman use for an unrelated
+reason (avoiding nested container engines).
+
+**Security posture, addressed directly rather than glossed over:**
+making this work needs `--security-opt seccomp=unconfined`, `--cap-add
+SYS_ADMIN`, and `--cap-add NET_ADMIN` (Guix's build sandbox calls
+`personality()`, `clone()`, and brings up its own loopback interface in
+a fresh network namespace -- all three blocked by different Docker
+defaults, discovered one at a time as each fix uncovered the next
+blocker further into a real build; see BUILDLOG.md for the exact
+failure modes). Raised and discussed directly: `systems-ide` already
+bridges `docker.sock`, and reaching that socket at all is already
+equivalent to host root (`docker run -v /:/host --rm -it alpine chroot
+/host`, confirmed as the standard mechanism, not project-specific) --
+so none of the three flags are a new category of risk, only a
+comparatively small widening of what can already reach that same
+ceiling. Also noted directly: the realistic alternative to running this
+in a container isn't "no such privilege exists" -- it's running the
+same Guile/Guix tooling directly in host-installed Emacs, which already
+carries the identical docker-group-implies-root exposure with no
+container involved at all.
+
+**A separate bug, unrelated to any of the above, found only once
+testing against the real `systems-ide` image:** `entrypoint.sh`'s
+`sudo guix-daemon ...` failed with "command not found" -- `sudo` resets
+`PATH` to its own `secure_path` by default, which doesn't include
+`~/.local/bin` (where `guix-daemon` is symlinked). Fixed with an
+absolute path (`sudo "$HOME/.local/bin/guix-daemon"`) rather than
+relying on PATH lookup through `sudo`.
+
+**Revisit if:** this project's security posture changes (e.g. adopting
+rootless/more isolated container tooling generally), or Guix ships a
+build-sandbox mode that doesn't need `personality()`/`clone()`.
+
+---
+
+## Guix daemon architecture: host-bridged by default, in-container as a toggle
+
+**Date:** 2026-07-22
+**Status:** Active
+
+**Decision:** `run.sh` (both aarch64 and x86_64 trees) gained a
+`guix_mounts` array mirroring `nix_mounts`'s `MOUNT_HOST_NIX` toggle
+exactly: `MOUNT_HOST_GUIX` (default `1`) bind-mounts the host's real
+`/gnu:ro` and `/var/guix` (read-write) in, so `systems-ide` shares the
+host's actual store and daemon by default. `entrypoint.sh` detects the
+bridge itself via the daemon socket's presence
+(`/var/guix/daemon-socket/socket`) and skips starting its own daemon +
+substitute-key authorization when it's active, falling back to the
+previous entry's self-contained behavior only when
+`MOUNT_HOST_GUIX=0` or the host has no `/gnu` at all.
+
+**Rationale:** The previous entry framed self-contained-vs-bridged as
+a one-time architectural choice. That framing was wrong: this exact
+project's own `MOUNT_HOST_NIX` toggle already demonstrates both
+properties -- shared host state by default, resilient fallback when
+the host's install is broken -- can coexist behind one runtime switch,
+not an either/or. Guix's version needed no `ldd`-based host-binary
+bridging wrapper the way Nix's does (Nix's binary lives outside `/nix`
+on this host, requiring `.host-nix-bridge`); Guix's own binary lives
+inside `/gnu/store`, and because the store is content-addressed, the
+container's build-time-baked `guix`/`guile` symlinks keep resolving
+correctly once the host's `/gnu` is bind-mounted over the container's
+local one -- confirmed live before writing any code, via a standalone
+`docker run -v /gnu:/gnu:ro -v /var/guix:/var/guix` test against the
+real host daemon.
+
+**Verified live, both paths, against the real rebuilt image:** bridged
+mode reached the host daemon with zero extra config (`guix` finds the
+socket at its own default path once `/var/guix` lands at the same
+path) and a `guix install tree` run from inside the container showed
+up in the *host's* real profile afterward; self-contained mode (no
+host mounts, same sandbox-capability flags as before) started its own
+daemon, authorized both substitute keys, and completed a `guix install
+hello` + ran the resulting binary. Full smoketest: 78/78, no
+regressions. See BUILDLOG.md for the full transcript.
+
+**Revisit if:** Guix ships a way to detect a stale/mismatched host
+store (e.g. a host `guix pull` mid-upgrade) that should trigger an
+automatic fallback rather than requiring `MOUNT_HOST_GUIX=0` by hand.
+
+---
+
+## Guile flight-test's load-path fix: whitelist one `.dir-locals.el` form, don't disable eval trust wholesale
+
+**Date:** 2026-07-22
+**Status:** Active
+
+**Decision:** Add the exact form `(add-to-list 'geiser-guile-load-path
+default-directory)` to `safe-local-eval-forms` in `config.el`, rather
+than setting `enable-local-eval` to `t`.
+
+**Rationale:** The flight-test fixture's own module-loading idiom
+(`(add-to-load-path (dirname (current-filename)))`) doesn't work under
+Geiser's per-form evaluation (see BUILDLOG.md 2026-07-22 for the full
+mechanism) -- the fix needed `.dir-locals.el` to reference
+`default-directory` dynamically, which requires an `eval' clause.
+Emacs prompts to trust unfamiliar `eval` dir-locals by default, which
+would hang a headless smoketest run. The tempting shortcut --
+`enable-local-eval t` -- was proposed and directly rejected: it trusts
+`eval` forms in *every* `.dir-locals.el` this Emacs instance ever
+opens, in any project, not just this repo's own fixture. Whitelisting
+the one exact form via `safe-local-eval-forms` keeps the trust boundary
+scoped to something this repo's own smoketest actually needs.
+
+Same underlying reasoning already applied earlier this session to the
+Guix build sandbox's `seccomp`/`SYS_ADMIN`/`NET_ADMIN` requirements
+(match the scope of a security relaxation to what's actually needed,
+don't reach for the broadest available bypass) -- worth noting this
+one wasn't proposed proactively; the user caught it directly when a
+tool call attempted the broader `enable-local-eval` change.
+
+**Revisit if:** more `.dir-locals.el` files with `eval` clauses
+accumulate across this project to the point where whitelisting each
+one individually becomes real maintenance overhead.

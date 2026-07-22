@@ -105,6 +105,23 @@
     (add-to-list 'projectile-project-root-files-bottom-up marker)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Dir-locals trust
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; `flight-tests/guile/.dir-locals.el' adds its own directory to
+;; `geiser-guile-load-path' via an `eval' clause -- the only way to
+;; reference `default-directory' dynamically rather than hardcoding an
+;; absolute path that would break on a different checkout location.
+;; Emacs prompts to trust unfamiliar `eval' dir-locals by default (a real
+;; safety feature, not something to disable wholesale via
+;; `enable-local-eval' -- that would trust eval forms in every project
+;; this Emacs ever opens, not just this repo's own fixture). Whitelisting
+;; this one exact form instead keeps the trust boundary scoped to
+;; something this repo's own smoketest actually needs, without touching
+;; the global setting.
+(add-to-list 'safe-local-eval-forms
+             '(add-to-list 'geiser-guile-load-path default-directory))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; load language configs and keybindings
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (load! "all-lisps-config")
@@ -132,3 +149,4 @@
 (load! "javascript-keybindings")
 (load! "typescript-keybindings")
 (load! "rust-keybindings")
+(load! "guile-keybindings")

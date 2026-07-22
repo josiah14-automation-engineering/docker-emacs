@@ -37,6 +37,31 @@ if [[ -d /nix ]] && [[ "${MOUNT_HOST_NIX:-1}" == "1" ]]; then
   )
 fi
 
+# Same idea as MOUNT_HOST_NIX above, but simpler: Guix's store is
+# content-addressed, so the container's own build-time-baked guix/guile
+# symlinks (pointing at specific /gnu/store hashes) keep resolving correctly
+# even once the host's /gnu replaces the container's local one -- no
+# ldd-based host-binary-bridging wrapper needed (this port never grew one
+# for Nix either -- see the aarch64 port's run.sh for that case, which
+# applies to a differently-packaged host Nix, not to Guix here). Confirmed
+# live: `docker run -v /gnu:/gnu:ro -v /var/guix:/var/guix ... guix install`
+# reached the host's daemon and completed immediately, no
+# GUIX_DAEMON_SOCKET override required -- guix looks for the socket at this
+# same default path. /var/guix is mounted read-write (not :ro) since it
+# holds the daemon socket dir and per-user profile symlinks that get
+# rewritten on every `guix install`/`upgrade`. entrypoint.sh detects this
+# bridge itself (via the socket's presence) and skips starting its own
+# in-container daemon when it's active. MOUNT_HOST_GUIX=0 falls back to
+# that self-contained daemon if the host's Guix is missing, corrupt, or
+# mid-upgrade.
+guix_mounts=()
+if [[ -d /gnu ]] && [[ "${MOUNT_HOST_GUIX:-1}" == "1" ]]; then
+  guix_mounts+=(
+    -v /gnu:/gnu:ro
+    -v /var/guix:/var/guix
+  )
+fi
+
 # Bridge the host's real Docker engine in rather than running a second
 # dockerd (with its own separate image/container storage) inside this
 # image -- docker.io here installs the CLIENT only. The socket is rootful
@@ -124,12 +149,31 @@ fi
 
 docker run --rm \
   --ipc host \
+  `# guix-daemon's own build sandbox needs all three of these -- each` \
+  `# confirmed live in isolation, one at a time, each fix uncovering the` \
+  `# next blocker further into an actual build. seccomp=unconfined: the` \
+  `# sandbox calls personality() (disables ASLR for reproducible builds),` \
+  `# blocked by Docker's default seccomp profile. --cap-add SYS_ADMIN: it` \
+  `# also calls clone() to create its own nested namespaces per build,` \
+  `# blocked independently of seccomp by Docker's default capability set.` \
+  `# --cap-add NET_ADMIN: it also brings up a loopback interface inside` \
+  `# that new network namespace, needing this capability separately from` \
+  `# SYS_ADMIN. None of these are a new category of risk in this` \
+  `# container: it already bridges docker.sock below, which alone is` \
+  `# already host-root-equivalent trust (see DECISIONLOG.md) -- and the` \
+  `# realistic alternative to containerizing this at all is running the` \
+  `# same tooling directly on the host with the same docker-group` \
+  `# privileges anyway.` \
+  --security-opt seccomp=unconfined \
+  --cap-add SYS_ADMIN \
+  --cap-add NET_ADMIN \
   --name "doom-systems-ide" \
   -e DISPLAY="${DISPLAY}" \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
   -v "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro" \
   -v "${HOME}/Development/personal:/home/${USER}/Development/personal" \
   "${nix_mounts[@]+"${nix_mounts[@]}"}" \
+  "${guix_mounts[@]+"${guix_mounts[@]}"}" \
   "${docker_mounts[@]+"${docker_mounts[@]}"}" \
   "${podman_mounts[@]+"${podman_mounts[@]}"}" \
   "${host_env[@]+"${host_env[@]}"}" \

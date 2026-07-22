@@ -61,6 +61,7 @@
        (python +lsp +pyright)
        (ruby +lsp)
        (rust +lsp)
+       (scheme +guile)
        (sh +lsp)
        yaml
 

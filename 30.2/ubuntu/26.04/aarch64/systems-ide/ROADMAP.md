@@ -280,25 +280,55 @@ and `lua-language-server --version` inside the container.
 
 ---
 
-## Step 11: Guile / Scheme — [#11](https://github.com/josiah14-automation-engineering/docker-emacs/issues/11)
+## ~~Step 11: Guile / Scheme~~ — [#11](https://github.com/josiah14-automation-engineering/docker-emacs/issues/11) ✓ COMPLETE
 
 Uses Geiser (REPL integration) rather than LSP — the correct Emacs-idiomatic
-approach for interactive Lisp development.
+approach for interactive Lisp development. Guile earns full-tier support
+specifically because it's the implementation language of GNU Guix (the
+Nix-equivalent in the Scheme world), not just general GNU-ecosystem affinity.
+
+**Verified:** full 78-test smoketest suite passing at 76/78 (the two
+failures — `vcpkg` version, `.h` file mode — are pre-existing and
+unrelated). Guile's own tests (version, `.scm` → `scheme-mode`,
+`flycheck-guile`, localleader format-buffer) all pass. Guix package
+management is also wired in and self-contained inside the container
+(`guix-daemon` runs in-container, started at container startup) — see
+BUILDLOG.md/DECISIONLOG.md 2026-07-21 for the full story, including a
+latent `polyglot-keybindings.el` bug found and fixed along the way that
+had been silently breaking every language's localleader keybindings.
+
+**Architecture decision: Guile is sourced from a standalone `guix-source`
+image, not a plain apt install.** Same pattern as Step 3's Nix — Ubuntu's
+apt `guile-3.0` and Guix's own bundled Guile only match by version
+coincidence (Ubuntu freezes at release time; Guix keeps moving), and the
+real intent is working with Guix's own package/channel definitions through
+Geiser later, which needs Guix's own Guile module load path. Verified live
+that no `guix-daemon` is needed to get a working `guile` out of the tarball
+at all: Guix is itself implemented in Guile, so a full Guile closure is
+already a transitive dependency of the `guix` package in the store — it's
+just not symlinked into `guix`'s own profile `bin/` by default. See
+`30.2/ubuntu/*/guix/` (both trees) and DECISIONLOG.md for the full
+reasoning trail, including the reversed initial recommendation.
 
 **Dockerfile:**
-- Add `guile-3.0` to the apt list
+- `FROM josiah14/guix:1.5.0-ubuntu-{24.04,26.04} AS guix-source`
+- `COPY --from=guix-source /gnu /gnu` and `/var/guix /var/guix`
+- Symlink `guix`/`guile`/`guild`/`guile-config` into
+  `~/.local/bin` (already on `PATH`), discovering the exact
+  content-addressed store paths at build time rather than hardcoding them
 
 **init.el:**
-- Add `(scheme +guile)` to `:lang`
-
-**packages.el:**
-- Add `(package! geiser-guile)` to pin the Guile backend explicitly
+- Add `(scheme +guile)` to `:lang`, between `(rust +lsp)` and `(sh +lsp)`
 
 **config.el:**
-- Add `(load! "guile-keybindings")`
+- Add `(load! "guile-keybindings")` — no separate `guile-config.el`, no
+  `packages.el` entry needed: Doom's own `lang/scheme/config.el` already
+  wires `set-lookup-handlers!`, `set-repl-handler!`, `flycheck-guile`,
+  and an extensive localleader map with zero extra config
 
-**Verify:** Open a `.scm` file; confirm Geiser activates. Run `M-x geiser-guile`
-to start a Guile REPL and send a form with `C-c C-e`.
+**Verify:** Open a `.scm` file; confirm `scheme-mode` + `flycheck-guile`
+activate. Run `guile --version` inside the container. `SPC m '` toggles a
+Geiser REPL.
 
 ---
 

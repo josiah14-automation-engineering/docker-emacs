@@ -2235,3 +2235,363 @@ cleanly, the same way `lsp-auto-guess-root` already does.
 Verified live against Rust, Go, and C's nested flight-test copies after
 the fix: workspace root correctly resolves to each project's own
 directory, not the repo root. Only verified on aarch64 so far.
+
+### 2026-07-21 — Guile added as a ninth full-support language, plus a standalone Guix image and in-container package manager
+
+Guile earns full support specifically because it's the implementation
+language of GNU Guix (the Nix-equivalent in the Scheme world), not just
+general GNU-ecosystem affinity — the user wanted Guix package-manager
+support wired in alongside it, not deferred. See DECISIONLOG.md for the
+apt-vs-Guix-sourced Guile reasoning and the Docker/Podman-vs-in-container
+daemon architecture reversal.
+
+**New standalone `guix-source` image** (`30.2/ubuntu/*/guix/`, both
+trees, modeled on `nix/Dockerfile`): downloads the official Guix binary
+tarball (`guix-binary-1.5.0.<arch>-linux.tar.xz`, checksum-pinned) and
+extracts it — no `guix-daemon` involved at all for this. Guix is itself
+implemented in Guile, so a full Guile closure (confirmed: `guile-3.0.9`
+at this Guix version) is already a transitive dependency of the `guix`
+package sitting in the store right after extraction; it's just not
+symlinked into `guix`'s own profile `bin/` by default. Discovering the
+store path at build time (rather than hardcoding the content-addressed
+hash, which is tied to this exact Guix release) and symlinking
+`guix`/`guix-daemon`/`guile`/`guild`/`guile-config` into `~/.local/bin`
+was all that was needed. Verified live: `guix --version` (1.5.0),
+`guile --version` (3.0.9), a real Guile eval, full 5/5 smoketest.
+
+**`systems-ide` wiring:** `COPY --from=guix-source /gnu /gnu` +
+`/var/guix /var/guix` (mirroring the existing Nix COPY pattern exactly),
+`(scheme +guile)` in `init.el`, `(load! "guile-keybindings")` in
+`config.el`. No `guile-config.el`, no `packages.el` entry — Doom's own
+`lang/scheme/config.el` already wires `set-lookup-handlers!`,
+`flycheck-guile`, and an extensive localleader map with zero extra
+config, confirmed via direct source read before writing anything.
+`flight-tests/guile/{utils.scm,main.scm}` mirrors Lua's `init.lua`+
+`utils.lua` split. New smoketest cases: guile version, `.scm` activates
+`scheme-mode`, `flycheck-guile` connects, localleader format-buffer
+resolves.
+
+#### A latent bug in `polyglot-keybindings.el` broke every language's localleader bindings, found while verifying Guile's
+
+First full smoketest run after wiring Guile showed 13+ *unrelated*
+localleader keybinding tests failing simultaneously (rust, go, nix, sh,
+bats, nu, c, lua, python, ruby, javascript, cmake, typescript, guile) —
+too broad to be a Guile-specific bug. `--debug-init` plus a `featurep`
+check on every `load!`-ed file in `config.el` gave precise ground truth:
+every file from `polyglot-keybindings.el` onward never loaded, because
+that file's own `map!` call errored synchronously at Doom-config load
+time (`Key sequence c l w S starts with non-prefix key c l`), and that
+error propagates all the way up through `doom-load`'s re-signaling
+chain to the single outer `condition-case` around the entire
+`doom-startup` sequence — aborting every subsequent `load!` call project-
+wide, not just this file's own content.
+
+Root cause: `SPC c l` (where `lsp-pick-root`, added earlier this
+project's history, was nested as `SPC c l w S`) is bound directly to
+`+default/lsp-command-map`, a plain interactive command (Doom's own
+flat LSP action palette, confirmed via `(keymapp (symbol-function
+'+default/lsp-command-map))` → `nil`) — not a real nestable keymap the
+way the original design assumed. `map!`'s `:prefix` nesting can only
+extend genuine keymaps, so trying to nest further under it fails
+immediately, every time, regardless of load order or `after!` wrapping
+(confirmed: wrapping in `after! lsp-mode` doesn't help, since the
+binding still isn't a keymap once lsp-mode loads either). Fixed by
+moving `lsp-pick-root` to a fresh top-level `SPC l w S` prefix instead
+of trying to nest under Doom's own `SPC c l`. Verified via `(lookup-key
+doom-leader-map (kbd "l w S"))` directly (bypasses buffer/evil-state
+ambiguity that a plain `key-binding` check is sensitive to) before and
+after rebuilding the real image; full smoketest re-run confirmed every
+previously-failing localleader test now passes.
+
+Separately found, not fixed (unrelated, deferred, non-blocking):
+`bats-config.el` throws "Unknown type lsp--client" from a `cl-typep`
+inliner failure inside its own deferred `eval-after-load 'lsp-mode`
+callback — doesn't cascade like the above (the error fires later, after
+`bats-config.el`'s own `(provide ...)` already ran), so it didn't block
+anything, but is a real latent bug in that file's bash-ls/bats-mode
+association worth a look later.
+
+#### Guix daemon runtime support (Phase 3): making `guix install` work self-contained, not bridged to a host daemon
+
+Originally planned as a Docker/Podman-style client-bridge (`guix`
+client in the container, `guix-daemon` running on the host or a
+sidecar) — reversed during planning once it was pointed out this makes
+Guix support fully dependent on an external daemon staying reachable,
+with zero in-container fallback, unlike every other package manager
+this project supports. Revised to run `guix-daemon` *inside*
+`systems-ide` itself, started at container *runtime* (not build time) —
+sidesteps the daemon-during-a-`RUN`-layer restriction entirely, since
+that restriction is specific to `docker build`, not a running
+container.
+
+New `entrypoint.sh`: starts `guix-daemon --build-users-group=guixbuild`
+in the background via passwordless `sudo` (added for `${USERNAME}`,
+matching `nix-source`/`guix-source`'s own convention), waits for the
+daemon socket, then `exec`s `"$@"` (`emacs`). `systems-ide` previously
+had no entrypoint at all (`CMD ["emacs"]` launched Emacs straight as
+PID1) — now `ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]` +
+`CMD ["emacs"]`. The `guixbuild` group and its 10 `guixbuilder`
+unprivileged build users are created at build time (ordinary
+`useradd`/`groupadd`, no daemon involved, folded into the existing
+user-creation layer).
+
+Four requirements found only by testing live, beyond the daemon
+itself — each fix uncovering the next blocker further into an actual
+build, not found all at once:
+- **`netbase`** — a minimal Ubuntu image has no `/etc/services` at all
+  (confirmed directly), so `guix-daemon`'s build sandbox fails every
+  network fetch, including fixed-output derivations, with `getaddrinfo:
+  Servname not supported for ai_socktype`. One apt package fixes it.
+- **`--security-opt seccomp=unconfined`** — the sandbox calls
+  `personality()` (disables ASLR for reproducible builds), blocked by
+  Docker's default seccomp profile.
+- **`--cap-add SYS_ADMIN`** — the sandbox also calls `clone()` to
+  create its own nested namespaces per build, blocked independently of
+  seccomp by Docker's default capability set (`clone: Operation not
+  permitted`) — only surfaced after fixing the two above.
+- **`--cap-add NET_ADMIN`** — the sandbox also brings up a loopback
+  interface inside its own new network namespace, needing this
+  capability separately from `SYS_ADMIN` (`cannot set loopback
+  interface flags: Operation not permitted`) — only surfaced after
+  fixing all three above, i.e. after getting substantially further
+  into a real build (past dozens of fixed-output derivation fetches).
+
+None of the three flags are a new category of risk here: `systems-ide`
+already bridges `docker.sock`, which alone is already host-root-
+equivalent trust (see DECISIONLOG.md), and the realistic alternative to
+containerizing this at all is running the same tooling directly on the
+host with the same `docker`-group privileges anyway.
+
+**A fifth bug, found only once testing against the real `systems-ide`
+image rather than the isolated `guix-source` test:** `entrypoint.sh`'s
+`sudo guix-daemon ...` failed with `guix-daemon: command not found` —
+`sudo` resets `PATH` to its own `secure_path` by default (confirmed
+live: `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:
+/snap/bin`), which doesn't include `~/.local/bin`, where `guix-daemon`
+is symlinked. Fixed by invoking `sudo "$HOME/.local/bin/guix-daemon"`
+directly rather than relying on PATH lookup through `sudo`.
+
+**Verified, precisely, what "verified" means here:** the isolated
+`guix-source` test (a throwaway container, same discipline as that
+image's own build-time verification) confirmed the build-sandbox
+mechanism itself works — `guix install hello` progressed correctly
+through privilege-dropping (build processes run as the unprivileged
+`guixbuilder*` users, confirmed via direct process inspection) and
+dozens of real fixed-output derivation downloads, well past all four
+blockers above, before being left running in the background rather
+than waited out to completion (substitutes didn't match this exact
+channel revision, so `hello` needed a full from-source bootstrap —
+gcc, glibc, and eventually the Linux kernel source itself — genuinely
+long-running, and orthogonal to whether the sandbox is configured
+correctly). Separately, and more directly relevant: rebuilding the real
+`systems-ide` image with the `entrypoint.sh` fix and running it with
+`--security-opt seccomp=unconfined --cap-add SYS_ADMIN --cap-add
+NET_ADMIN` confirmed `guix-daemon` starts correctly (socket present,
+process running as expected) with no reliance on the isolated test's
+outcome. Full smoketest re-run after this fix: still 76/78 (the two
+pre-existing, unrelated failures — `vcpkg` version, `.h` file mode —
+unchanged, no regressions introduced).
+
+A real, external Codeberg outage (HTTP 503, confirmed via `curl` across
+multiple retries a minute apart) blocked `geiser`'s clone (its MELPA
+recipe points exclusively at `codeberg.org/geiser/geiser`) for part of
+this session — resolved on its own; not a project issue. Second
+Codeberg-hosted-project outage this week during late US evening hours,
+both resolved by morning.
+
+#### Follow-up, same day: two more real bugs found by actually driving the running container end to end
+
+Everything above was verified via `smoketest.bats` plus one-off
+`emacsclient --eval` checks against a running daemon. Actually launching
+`systems-ide` via its real `run.sh` and working through the Guile flight
+test the way a real session would (open file, open REPL, evaluate)
+surfaced two more real, previously-invisible bugs.
+
+**Bug 1 — Doom's own Guix load-path integration errored on every REPL
+connect.** Doom's `:lang scheme +guile` module conditionally runs
+`(add-to-list 'geiser-guile-load-path
+"~/.config/guix/current/share/guile/site/3.0")` whenever `guix` is on
+PATH. `~/.config/guix/current` is Guix's own standard per-user profile
+symlink (created by the official `guix-install.sh`), which this
+project's simplified tarball-extraction `guix-source` approach never
+created — only individual binaries got symlinked into `~/.local/bin`.
+Every Guile REPL connect logged `In procedure stat: No such file or
+directory` for that path. Fixed: `systems-ide`'s Dockerfile now also
+symlinks `~/.config/guix/current` to the extracted profile, matching
+Guix's own convention. Confirmed live, both before (error) and after
+(clean `ge:add-to-load-path` success) the fix.
+
+**Bug 2 — the flight-test fixture's own module-loading idiom doesn't
+survive Geiser's per-form evaluation.** `main.scm` opens with
+`(add-to-load-path (dirname (current-filename)))`, which works fine for
+a plain `guile main.scm` run (confirmed earlier this session) but
+silently fails to find `utils.scm` when a real user evaluates the
+buffer through Doom/Geiser (`SPC m e e`/`e b`) — confirmed directly:
+`(defined? 'greet)` came back false after evaluating every form in the
+file that way. Root cause: Geiser doesn't tell Guile to *load* the
+file when you eval a form or a buffer — it sends the form's *text*
+straight to the REPL, the same as if you'd typed it. Guile is never
+actually reading through `main.scm`, so `(current-filename)` (which
+only means something while a file is genuinely being read top to
+bottom) has nothing to point to. `(getcwd)` doesn't help either --
+confirmed live it resolves to the outer repo root inside this REPL, the
+same `doom-project-root`/Projectile chain already documented above, not
+the fixture's own directory.
+
+Fixed with `flight-tests/guile/.dir-locals.el`:
+```elisp
+((scheme-mode . ((eval . (add-to-list 'geiser-guile-load-path default-directory)))))
+```
+`default-directory` doesn't have the `current-filename` problem —
+Emacs always knows a buffer's own directory unambiguously, regardless
+of how its contents get evaluated afterward. This moves the "where am I"
+question from Guile's side (broken under Geiser) to Emacs's side
+(always correct).
+
+**A real security consideration, not glossed over:** `eval` in
+`.dir-locals.el` is untrusted by default — Emacs prompts before running
+it, which would hang a headless smoketest run (and did, twice, during
+this investigation, alongside an unrelated `kill-buffer`-on-a-live-
+process prompt hit while debugging the *original* bug — both self-
+inflicted testing artifacts, not integration bugs, but worth remembering
+that any confirmation prompt hangs a scripted `emacsclient` session).
+Rejected `enable-local-eval` (would trust eval forms in *every* project
+this Emacs ever opens) in favor of whitelisting this one exact form via
+`safe-local-eval-forms` in `config.el` — same reasoning already applied
+to `seccomp`/`SYS_ADMIN`/`NET_ADMIN` elsewhere this session (match the
+scope of trust to what's actually needed), but this time the user
+caught it directly rather than it being proposed proactively.
+
+Verified live, end to end, after both fixes: opening `main.scm`,
+connecting the REPL, and evaluating `(begin (use-modules (utils))
+(greet "systems-ide"))` returns the correct
+`"Hello from Guile, systems-ide!"`. Full smoketest re-run: still 76/78,
+no regressions.
+
+#### Closing the loop: a real `guix install` completing inside `systems-ide` itself, not just the isolated test
+
+Everything above about Phase 3 (`guix-daemon` starting correctly) was
+verified either in the isolated `guix-source` test container or by
+checking the daemon starts inside the real image -- never an actual
+`guix install` run to completion *inside `systems-ide`*. Doing that
+found one more real gap: `/etc/guix/acl` had zero authorized substitute-
+server keys inside the container (confirmed directly), so every install
+fell back to building entirely from source -- the same slow path that,
+in the earlier isolated test, got deep into bootstrapping a full
+toolchain (gcc, glibc, kernel headers) before hitting a genuine
+`automake-1.17` build failure. The real Asahi host doesn't have this
+problem because `guix-install.sh`'s own interactive flow authorizes
+`ci.guix.gnu.org`/`bordeaux.guix.gnu.org` automatically when you answer
+yes to its "permit downloading pre-built binaries" prompt -- `entrypoint.sh`
+had no equivalent step.
+
+Fixed by adding the same two `guix archive --authorize` calls
+`entrypoint.sh` already does implicitly need, using the `.pub` key
+files Guix ships in its own profile (`share/guix/*.pub` -- no need to
+fetch or author anything). Runs on every container launch, same
+reasoning as the build-users-group setup: the container is `--rm`, so
+`/etc/guix/acl` starts empty every time. Verified live, twice, with two
+different packages (`hello`, `tree`) in the real rebuilt image: both
+install in seconds via substitutes and the resulting binaries run
+correctly -- no from-source bootstrap needed at all anymore.
+
+This also settled a real question worth recording plainly, at the time:
+`run.sh` had no `/gnu`/`/var/guix` bind mounts from the host at all
+(confirmed directly, unlike Nix's own host-store bind mounts) --
+`systems-ide`'s Guix was *completely* self-contained, with zero
+dependency on the host having Guix installed, working, or even
+present. **Superseded by the very next section below** -- this framed
+self-contained-vs-host-bridged as a permanent architectural choice,
+when in fact `MOUNT_HOST_NIX` already proved (for Nix, in this same
+file) that both properties can coexist behind one runtime toggle. The
+self-contained behavior described above is now the `MOUNT_HOST_GUIX=0`
+fallback path, not the only path.
+
+#### `MOUNT_HOST_GUIX`: mirroring `MOUNT_HOST_NIX`'s host-bridge toggle for Guix
+
+Prompted by a direct question: if Nix's `run.sh` bridge already proves
+a container can share the host's real store *and* fall back to a
+self-contained one when the host's install is missing or broken, why
+was Guix framed as an either/or a section above? It wasn't -- that was
+a framing mistake, corrected directly. The fix: give Guix the same
+runtime toggle Nix already has, not a second permanent architecture.
+
+Feasibility confirmed first with a standalone test against the host's
+real daemon, before touching any code:
+
+```
+docker run --rm -v /gnu:/gnu:ro -v /var/guix:/var/guix \
+  josiah14/guix:1.5.0-ubuntu-26.04 bash -c '
+    guix package -I
+    guix install --no-grafts which
+'
+```
+
+This worked immediately, with no `GUIX_DAEMON_SOCKET` override --
+`guix` looks for the daemon socket at its own default path
+(`/var/guix/daemon-socket/socket`), and bind-mounting `/var/guix` at
+that identical path is all it takes. `guix package -I` showed `guile`
+already present, reading the *host's* real per-user profile directly.
+
+Unlike Nix's bridge, no `ldd`-based host-binary-bridging wrapper
+(`.host-nix-bridge`) is needed. Nix's wrapper exists because this
+host's Nix binary lives outside `/nix` entirely (Fedora's nix-core
+RPM); Guix's own binary lives inside `/gnu/store` itself, and because
+the store is content-addressed, the container's own build-time-baked
+`guix`/`guile` symlinks (pointing at specific store-hash paths) keep
+resolving correctly transparently, even after the host's `/gnu`
+replaces the container's local one -- confirmed live during this same
+test.
+
+`run.sh` (both aarch64 and x86_64 trees) gained a `guix_mounts` array
+mirroring `nix_mounts`'s gating exactly:
+
+```sh
+guix_mounts=()
+if [[ -d /gnu ]] && [[ "${MOUNT_HOST_GUIX:-1}" == "1" ]]; then
+  guix_mounts+=(
+    -v /gnu:/gnu:ro
+    -v /var/guix:/var/guix
+  )
+fi
+```
+
+`/var/guix` is read-write (not `:ro` like Nix's `/nix` split) since it
+holds the daemon's socket directory and per-user profile symlinks that
+get rewritten on every `guix install`/`upgrade`.
+
+`entrypoint.sh` needed a matching change: when the host bridge is
+active, the host's own `guix-daemon` is already running and its socket
+is already sitting at the bind-mounted path the moment the container
+starts -- starting a second daemon here would just race the host
+daemon for the same socket. Detected by the socket's own presence
+(`[ -S /var/guix/daemon-socket/socket ]`) rather than reading
+`MOUNT_HOST_GUIX` directly, since `entrypoint.sh` never receives
+`run.sh`'s environment, only the mounts it set up. When bridged, both
+the daemon-start and the substitute-key-authorization step from the
+section above are skipped entirely -- the host's own `/etc/guix/acl`
+already has those keys, from the original `guix-install.sh` run.
+
+Verified live, both modes, against the real rebuilt image:
+
+- **Bridged** (`-v /gnu:/gnu:ro -v /var/guix:/var/guix`, no extra
+  flags): `entrypoint.sh` printed "bridged host daemon detected...
+  skipping in-container daemon + key authorization"; `guix install
+  tree` completed via the host daemon; confirmed the install actually
+  landed on the *host's real profile* by running `guix package -I` on
+  the host directly afterward -- `tree` was there.
+- **Self-contained** (no host mounts, same `--security-opt
+  seccomp=unconfined --cap-add SYS_ADMIN --cap-add NET_ADMIN` flags
+  `run.sh` already sets): `entrypoint.sh` started its own daemon,
+  authorized both substitute-server keys, `guix install hello`
+  completed via substitutes, and the resulting binary ran and printed
+  `Hello, world!`.
+
+Full smoketest re-run after rebuilding with the new `entrypoint.sh`:
+78/78, no regressions.
+
+Net effect: `systems-ide`'s Guix now matches Nix's exact resilience
+model -- host-bridged by default (shared store, persistent installs,
+survives container restarts) with a same-session fallback to fully
+self-contained if the host's Guix is ever missing, corrupt, or
+mid-upgrade, via one env var (`MOUNT_HOST_GUIX=0`).

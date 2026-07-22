@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 
-# IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Bats + Nushell +
-# C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript glue-script tier).
+# IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Guile + Bats +
+# Nushell + C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript glue-script
+# tier).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -13,7 +14,7 @@
 #
 # Run via: bats smoketest.bats
 # bash-language-server, shellcheck, zshdb, go, gopls, dlv, golangci-lint, bats,
-# nu, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
+# nu, guile, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
 # lua-language-server, stylua, python3, pyright, ruff, ruby, ruby-lsp,
 # rubocop, typescript-language-server, prettier, oxlint, cargo, rustc,
 # rust-analyzer, rustfmt, clippy, lldb are all baked into the image at
@@ -75,6 +76,10 @@ EOF
 def main [] {
   echo "hi"
 }
+EOF
+  cat > /tmp/smoketest/test.scm <<'EOF'
+(display "hi")
+(newline)
 EOF
   cat > /tmp/smoketest/test.c <<'EOF'
 int main(void) { return 0; }
@@ -372,6 +377,30 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.nu") (featurep (quote lsp-mode)))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "t" ]]
+}
+
+@test "guile is installed and reports a version" {
+  run guile --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Guile" ]]
+}
+
+@test "opening a .scm file activates scheme-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.scm") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "scheme-mode" ]]
+}
+
+@test "flycheck-guile connects for scheme-mode buffers ((scheme +guile))" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.scm") (list (bound-and-true-p flycheck-mode) (flycheck-get-checker-for-buffer)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(t guile)" ]]
+}
+
+@test "guile localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.scm") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
 }
 
 @test "opening a .c file activates c-mode" {

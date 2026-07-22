@@ -15,6 +15,8 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certifica
 
 FROM josiah14/nix:2.34.7-ubuntu-24.04 AS nix-source
 
+FROM josiah14/guix:1.5.0-ubuntu-24.04 AS guix-source
+
 # --- Final image ---
 FROM ubuntu:24.04
 
@@ -231,6 +233,16 @@ RUN apt-get update -y && \
       ruby \
       ruby-dev \
       libyaml-dev \
+      `# --- guile/guix ide ---` \
+      `# netbase provides /etc/services -- confirmed live this doesn't` \
+      `# exist at all in a minimal Ubuntu image, and without it` \
+      `# guix-daemon's build sandbox fails every network fetch (fixed-` \
+      `# output derivations included) with "getaddrinfo: Servname not` \
+      `# supported for ai_socktype" -- getaddrinfo can't resolve a` \
+      `# service name like "https" to a port without this file. Guile` \
+      `# itself needs no apt package at all (comes from guix-source, see` \
+      `# the COPY below); this is purely for guix-daemon's own runtime.` \
+      netbase \
       `# --- fonts ---` \
       adwaita-icon-theme \
       fontconfig \
@@ -315,23 +327,64 @@ RUN curl -fsSL "https://github.com/nushell/nushell/releases/download/${NU_VERSIO
     && install -m 755 "/tmp/nu-${NU_VERSION}-x86_64-unknown-linux-gnu/nu" /usr/local/bin/nu \
     && rm -rf /tmp/nu.tar.gz "/tmp/nu-${NU_VERSION}-x86_64-unknown-linux-gnu"
 
+# guixbuild + guixbuilder01..10: the unprivileged build-user pool
+# guix-daemon's --build-users-group needs (Phase 3, see entrypoint.sh).
+# Passwordless sudo for ${USERNAME} is what lets the entrypoint start
+# guix-daemon as root without changing this image's default runtime
+# user -- consistent with this project's own guix-source/nix-source
+# images, which already grant the same NOPASSWD:ALL to their own users.
 RUN userdel ubuntu || true \
     && groupadd -g ${USER_GID} ${USERNAME} \
     && mkdir -p /home/${USERNAME}/.config/emacs \
     && mkdir -p /home/${USERNAME}/.local/share/fonts \
     && useradd -u ${USER_UID} -g ${USER_GID} ${USERNAME} \
-    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
+    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME} \
+    && mkdir -p /etc/sudoers.d \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME} \
+    && groupadd --system guixbuild \
+    && for i in $(seq -w 1 10); do \
+         useradd -g guixbuild -G guixbuild -d /var/empty -s /usr/sbin/nologin \
+           -c "Guix build user $i" --system guixbuilder$i; \
+       done
 
 COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /nix /nix
 COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.local/state/nix /home/${USERNAME}/.local/state/nix
 COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/nix /home/${USERNAME}/.config/nix
 COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/direnv /home/${USERNAME}/.config/direnv
+COPY --from=guix-source --chown=${USERNAME}:${USERNAME} /gnu /gnu
+COPY --from=guix-source --chown=${USERNAME}:${USERNAME} /var/guix /var/guix
 
 USER ${USERNAME}
 ENV USER=${USERNAME}
 ENV HOME=/home/${USERNAME}
 
-RUN ln -sf "/home/${USERNAME}/.local/state/nix/profiles/profile" "/home/${USERNAME}/.nix-profile"
+# Nix's profile symlink, plus Guix/Guile's -- same "discover the store path
+# at build time, don't hardcode the content-addressed hash" reasoning as
+# guix-source's own Dockerfile (the hash is tied to GUIX_VERSION's build
+# closure). This step itself needs no daemon -- `/home/${USERNAME}/.local/bin`
+# is already on PATH (see the emacs/bin PATH entry above), so the symlinks
+# just need to exist. `guix-daemon` is only actually started later, at
+# container runtime (see entrypoint.sh, Phase 3).
+#
+# ~/.config/guix/current is Guix's own standard per-user profile symlink
+# convention (what the official guix-install.sh itself creates) -- added
+# here too, confirmed live this project's own Doom module needs it: Doom's
+# `:lang scheme +guile` conditionally adds
+# "~/.config/guix/current/share/guile/site/3.0" to Geiser's load path
+# whenever `guix` is on PATH, and errors ("No such file or directory")
+# every time a Guile REPL connects without it.
+RUN ln -sf "/home/${USERNAME}/.local/state/nix/profiles/profile" "/home/${USERNAME}/.nix-profile" \
+    && mkdir -p "/home/${USERNAME}/.local/bin" "/home/${USERNAME}/.config/guix" \
+    && ln -sf "/var/guix/profiles/per-user/root/current-guix" "/home/${USERNAME}/.config/guix/current" \
+    && GUIX_PROFILE="$(readlink -f /var/guix/profiles/per-user/root/current-guix)" \
+    && GUILE_STORE_DIR="$(find /gnu/store -maxdepth 1 -iname '*-guile-3.*' ! -iname '*doc*' -printf '%f\n' | sort -V | tail -1)" \
+    && for bin in guix guix-daemon; do \
+         ln -sf "${GUIX_PROFILE}/bin/${bin}" "/home/${USERNAME}/.local/bin/${bin}"; \
+       done \
+    && for bin in guile guild guile-config; do \
+         ln -sf "/gnu/store/${GUILE_STORE_DIR}/bin/${bin}" "/home/${USERNAME}/.local/bin/${bin}"; \
+       done
 
 # godef omitted: dead project (last release 2020); golang.org/x/tools dep frozen at pre-1.21 panics on Go 1.26+.
 # SPC m h . remapped to lsp-describe-thing-at-point in go-keybindings.el.
@@ -597,4 +650,8 @@ RUN sed -i "s/<full-name>/\"${FULLNAME}\"/" /home/${USERNAME}/.config/doom/confi
     && rm -rf /home/${USERNAME}/.config/emacs/.local/straight/build-* \
     && /home/${USERNAME}/.config/emacs/bin/doom sync -! -u -j "$(( $(nproc) > 2 ? $(nproc) - 1 : 1 ))" --aot --gc
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN sudo chmod +x /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["emacs"]
