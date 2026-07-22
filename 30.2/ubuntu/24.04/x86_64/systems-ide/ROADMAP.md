@@ -334,39 +334,113 @@ actual x86_64 build + smoketest run confirms it.
 
 ## Step 11.5: Racket + Rash
 
-No GitHub issue yet. Comes after Guile deliberately — same Scheme family,
-same Geiser-based REPL-first philosophy, worth doing back to back. Rash is
-a `#lang rash` shell-scripting DSL built directly on Racket, chosen over
-`scsh` (confirmed dormant -- last stable release 2006, ~20 years without
+No GitHub issue yet. Comes after Guile deliberately — same Lisp-family,
+REPL-first philosophy, worth doing back to back (though Racket's own Doom
+module turns out to use `racket-mode`'s own REPL machinery, not Geiser —
+correcting this section's earlier assumption, see below). Rash is a
+`#lang rash` shell-scripting DSL built directly on Racket, chosen over
+`scsh` (confirmed dormant — last stable release 2006, ~20 years without
 active maintenance, fails this project's own "boring, reproducible,
 actively-maintained dependency" standard, see AGENTS.md) as the actual
-systems-scripting answer in this family. Racket's own apt package version
-vs. the official `.sh` installer needs a real comparison before picking —
-TODO, verify current Ubuntu 24.04/26.04 apt package freshness against
-https://download.racket-lang.org/ before deciding.
+systems-scripting answer in this family.
+
+**Real gap to weigh before starting, not glossed over:** `racket-rash`
+(willghatch/racket-rash — confirmed directly against
+pkgs.racket-lang.org/package/rash that this, not the unrelated
+`cesquivias/rash` or the Rust-based `rash-sh/rash`, is what `raco pkg
+install rash` actually resolves to) last pushed 2024-01-29 — about 2.5
+years stale as of this writing, 35 open issues, not archived. Nowhere
+near scsh's 20-year dormancy, and its own docs describe it as "largely
+stable" with only some parts marked unstable, but this is still a real
+question against this project's own maintenance standard, not a clean
+pass — there's no better alternative for "shell DSL in Racket" (scsh
+already ruled out), so the honest framing is "accept this tradeoff,"
+not "no tradeoff exists." Flag for an explicit go/no-go before
+implementing rather than proceeding silently.
+
+**Doom's `:lang racket` module already exists** at the pinned commit
+(confirmed directly: `modules/lang/racket/{config,packages,README.org}`
+all present) — corrects this section's earlier "unconfirmed" caveat.
+Key findings from its actual source:
+- Package: `racket-mode` (Greg Hendershott's), pinned by Doom itself —
+  no separate `(package! racket-mode)` needed in this project's own
+  `packages.el`.
+- `+lsp` flag: requires `:tools lsp` (already enabled in this image)
+  plus a langserver on PATH — Doom's own README names
+  `racket-langserver` (jeapostrophe/racket-langserver) by name.
+  Confirmed still active (updates through Feb 2026, compatible with
+  Racket 7.6–9.2).
+- Doom's own `config.el` already wires a *rich* localleader map (run,
+  test, expand-macro variants, send region/definition/last-sexp to the
+  REPL, visit-definition, docs, logger, profiler, unicode input,
+  paren-shape cycling) plus REPL/lookup handlers and a formatter
+  (`raco fmt`, via the `fmt` package + this project's own `:editor
+  format` module, already enabled) — unlike Nushell/TOML/Fish/
+  Assembly, which all needed a project-authored `{lang}-config.el`/
+  `{lang}-keybindings.el` from scratch, Racket's Doom module is
+  actively-enough-built-out that **no new elisp file may be needed at
+  all**, just the `init.el` flag below. Confirm this live before
+  assuming zero elisp work, though — Doom's own README admits "this
+  module needs a maintainer" (no active owner, even if the code itself
+  still works).
+- `.rkt` is the only extension Doom's module wires by default (plus
+  `.scrbl`/`.rhm` behind an opt-in `+hash-lang` flag, deliberately left
+  off for this project's initial scope — Scribble/Rhombus aren't part
+  of this ask, revisit if wanted later). This also answers Rash's own
+  file-extension question: `willghatch/racket-rash`'s own demo scripts
+  all use plain `.rkt` (confirmed directly against its repo, e.g.
+  `rash-demos/rash/demo/rc17.rkt`) with a `#lang rash` line inside, not
+  a separate extension — Racket's `#lang` mechanism is file-extension-
+  agnostic, so no additional `auto-mode-alist` entry is needed for Rash
+  specifically.
+
+**Racket install: prefer the official installer over apt, matching this
+project's general bias** (rustup over apt for Rust, pinned binary
+releases over apt for Nu/ruff/stylua/lua-language-server). Confirmed
+live via a throwaway `ubuntu:26.04`/`ubuntu:24.04` container: apt ships
+Racket 8.18 (26.04, resolute) / 8.10 (24.04, noble) against the actual
+current stable release, 9.2 (May 2026) — multiple minor versions
+behind, the same "apt is stale" pattern already hit with
+TypeScript/rbs/cmake-language-server elsewhere in this file. Both
+`racket-minimal-9.2-{arch}-linux-buster-cs.sh` self-extracting
+installers exist for aarch64 and x86_64
+(mirror.racket-lang.org/installers/9.2/) — "minimal" over the full
+`racket-9.2-...` variant, mirroring how Doom's own README recommends
+`racket-minimal` on Arch "for fewer dependencies." SHA256 hashes are
+published inline per-file on mirror.racket-lang.org/releases/9.2/ (no
+separate SHA256SUMS file) — capture fresh at implementation time
+rather than trusting any previously-recorded hash, same as every other
+checksum in this file.
 
 **Dockerfile:**
-- Install Racket -- TODO: apt `racket` package vs. official installer,
-  pin whichever is chosen (version + checksum, matching every other
-  language install in this file)
-- `raco pkg install rash` once Racket itself is installed (rides on
-  Racket's own package manager, no separate toolchain)
+- Download + verify + run `racket-minimal-9.2-{aarch64,x86_64}-linux-buster-cs.sh`
+  (self-extracting installer — check its own `--help` for the exact
+  non-interactive invocation before scripting it, matching the care
+  already taken with Guix's own non-interactive-install research; don't
+  assume a flag shape without checking)
+- `raco pkg install racket-langserver rash fmt` once Racket itself is on
+  PATH — rides on Racket's own package manager, no separate toolchain,
+  mirrors how `guix archive --authorize`/`rustup component add` layer
+  on top of their own base installs
 
-**init.el / packages.el:**
-- Check for a Doom `:lang racket` module first (unconfirmed -- verify
-  against the pinned Doom commit before assuming one exists, same
-  caveat as Crystal below). If none, `(package! racket-mode)` (Greg
-  Hendershott's package -- the de facto standard standalone Racket mode
-  for Emacs, provides major-mode + REPL + basic debugging support) is
-  the fallback.
+**init.el:**
+- Add `(racket +lsp)` to `:lang`, between `(python ...)` and `(ruby
+  +lsp)` (alphabetical, matching this file's existing ordering)
 
-**config.el:**
-- Add `(load! "racket-keybindings")` (new file)
+**config.el / packages.el:**
+- Likely nothing — verify live first (see the "no new elisp file may be
+  needed at all" finding above) before authoring anything
 
-**Verify:** Open a `.rkt` file; confirm `racket-mode` (or Doom's module)
-activates, REPL starts, completions/hover work. Open a `#lang rash` file;
-confirm mode detection and REPL send-to-process both work the same way.
-Run `racket --version` and confirm `rash` is requireable inside the
+**Verify:** Open a `.rkt` file with `#lang racket`; confirm `racket-mode`
+activates, `racket-langserver` connects, the REPL starts via `SPC m r`,
+and `raco fmt` formats via `:editor format`'s existing on-save wiring.
+Open a second `.rkt` file with `#lang rash` instead; confirm the same
+mode activates and check specifically how well `racket-langserver`'s
+analysis holds up against a non-core `#lang` (its own docs describe it
+working via DrRacket's public API, which is #lang-generic in principle
+but unverified in practice for Rash specifically — don't assume parity
+with plain Racket without checking). Run `racket --version` (expect
+9.2) and confirm `rash`/`fmt` are `raco pkg show`-visible inside the
 container.
 
 ---
@@ -456,31 +530,70 @@ No Doom module exists for TOML. Requires manual mode + LSP wiring.
 
 ---
 
-## Step 13: Assembly — [#13](https://github.com/josiah14-automation-engineering/docker-emacs/issues/13)
+## ~~Step 13: Assembly~~ — [#13](https://github.com/josiah14-automation-engineering/docker-emacs/issues/13) ✓ COMPLETE
 
-Syntax only — no LSP, no debugger integration needed beyond what gdb already provides.
+**Upgraded beyond the original syntax-only scope**: research turned up
+`asm-lsp` (bergercookie/asm-lsp, Rust), a real language server (hover,
+completion, signature help, goto-definition, references for GAS/NASM/
+x86/x86_64/ARM/RISCV assembly, diagnostics via invoking gcc/clang
+directly) with a built-in `lsp-mode` client (`clients/lsp-asm.el`) that
+already activates for stock `asm-mode` — no manual `lsp-register-client`
+needed, just an explicit `(require 'lsp-asm)` inside `(after! lsp-mode
+...)` the same shape `nu-config.el` already established for lsp-nushell.
 
-**init.el:**
-- Add `asm` to `:lang`
+No Doom `:lang asm` module exists (confirmed against the pinned Doom
+commit's `modules/lang/` tree — doomemacs has never shipped one), and
+none was needed: `asm-mode` ships built into Emacs core with `.s`/`.S`/
+`.asm` already in the default `auto-mode-alist` (confirmed live via
+`emacs -Q --batch`). New `asm-config.el` just hooks `lsp!` onto
+`asm-mode-local-vars-hook` and forces the `lsp-asm` require.
 
-**Verify:** Open a `.asm` or `.s` file; confirm syntax highlighting.
+**Dockerfile (per-tree divergence, not a copy-paste):** aarch64 has no
+Linux/aarch64 prebuilt `asm-lsp` release (confirmed against the actual
+GitHub release assets — only `aarch64-apple-darwin`, `x86_64-apple-
+darwin`, `x86_64-unknown-linux-gnu`), so it's installed via `cargo
+install asm-lsp --locked --version 0.10.1` after the Rust step — which
+needed `pkg-config`/`libssl-dev` added to the apt list too (confirmed
+live: without them, the build fails on `openssl-sys` with "Could not
+find directory of OpenSSL installation"). x86_64 *does* have a
+published Linux binary, so that tree uses the prebuilt-tarball pattern
+instead (matching ruff/stylua), with no Rust-toolchain coupling and no
+extra apt packages needed.
+
+No keybindings file — no formatter or build/run/test analog exists for
+generic assembly, so there was nothing to bind beyond the global LSP
+keys `lsp-mode` already provides for any active buffer.
 
 ---
 
-## Step 14: Syntax-only batch — [#14](https://github.com/josiah14-automation-engineering/docker-emacs/issues/14)
+## ~~Step 14: Syntax-only batch~~ — [#14](https://github.com/josiah14-automation-engineering/docker-emacs/issues/14) ✓ COMPLETE (Fish upgraded, Perl and Assembly split out)
 
-All lightweight. Add to init.el in one go; no Dockerfile changes.
+**Fish upgraded beyond syntax-only, same reasoning as Assembly above**:
+`fish-lsp` (ndonfris/fish-lsp, npm) is a real language server
+(completion, hover, diagnostics) for fish scripts, but unlike asm-lsp,
+`lsp-mode` ships no built-in client for it — registered by hand in new
+`fish-config.el` (`lsp-register-client` + `lsp-stdio-connection '("fish-lsp"
+"start")`, matching the shape planned for TOML). `fish-mode`
+(wwwjfy/emacs-fish, `packages.el`) self-registers `.fish`/the `fish`
+interpreter shebang via its own `;;;###autoload` cookies — no manual
+`auto-mode-alist` wiring needed. Formatting needed no override either:
+apheleia already defaults `fish-mode` to its own `fish-indent` formatter
+(confirmed directly from `apheleia-formatters.el`). New
+`fish-keybindings.el` binds `SPC m f` to `apheleia-format-buffer`,
+matching every other full-tier language.
 
-**Dockerfile:**
-- Add `ruby perl fish` to the apt list (runtimes for running scripts, not just reading)
+**Perl stays deliberately syntax-only** (Josiah: "I hate Perl, code in
+it is usually a mess, I want to discourage Perl use") — no LSP, no
+keybindings file, no Dockerfile change at all: `perl` 5.40.1 is already
+a transitive apt dependency of something else in the image (confirmed
+live — present with zero explicit `perl` package anywhere in the apt
+list), and `perl-mode` + the `.pl`/`.pm` → `perl-mode` mapping both ship
+built into Emacs core by default (confirmed live via `emacs -Q
+--batch`). Nothing to add.
 
-**init.el:**
-- Add to `:lang`: `(python)`, `ruby`, `perl`
-
-**packages.el:**
-- Add `(package! fish-mode)` — Fish is not covered by `:lang sh`
-
-**Verify:** Open one file of each type; confirm syntax highlighting fires.
+Assembly split out into its own completed step above rather than
+staying folded into this batch, once it turned out to warrant full LSP
+too.
 
 ---
 

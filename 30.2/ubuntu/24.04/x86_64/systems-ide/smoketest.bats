@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 
 # IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Bats + Nushell +
-# C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript glue-script tier).
+# C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript glue-script tier +
+# Fish + Assembly + Perl syntax-only).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -16,8 +17,8 @@
 # nu, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
 # lua-language-server, stylua, python3, pyright, ruff, ruby, ruby-lsp,
 # rubocop, typescript-language-server, prettier, oxlint, cargo, rustc,
-# rust-analyzer, rustfmt, clippy, lldb are all baked into the image at
-# build time (no network/host bind mounts required). nu and
+# rust-analyzer, rustfmt, clippy, lldb, fish, fish-lsp, asm-lsp are all baked
+# into the image at build time (no network/host bind mounts required). nu and
 # clangd both double as their own LSP server, no separate language-server
 # package needed for either. ccls is deliberately not installed (see
 # Dockerfile) -- Doom's own :lang cc module already deprioritizes it below
@@ -82,11 +83,42 @@ EOF
   cat > /tmp/smoketest/test.cpp <<'EOF'
 int main() { return 0; }
 EOF
-  cat > /tmp/smoketest/test.h <<'EOF'
+  # Deliberately NOT named test.h -- confirmed live that c-or-c++-mode's
+  # ambiguous-header heuristic disambiguates via a same-basename sibling
+  # source file when one exists (test.c/test.cpp both exist in this same
+  # directory), landing on c++-mode instead of the "no sibling, no
+  # content signal" fallback this test means to check. A unique basename
+  # keeps this test's actual claim (Doom's default header fallback)
+  # true regardless of what other fixtures share this directory.
+  cat > /tmp/smoketest/header-only.h <<'EOF'
 #pragma once
 EOF
   cat > /tmp/smoketest/test.mm <<'EOF'
 int main() { return 0; }
+EOF
+  cat > /tmp/smoketest/test.fish <<'EOF'
+echo "hi"
+EOF
+  cat > /tmp/smoketest/test.pl <<'EOF'
+print "hi\n";
+EOF
+  # In its own subdirectory, not /tmp/smoketest/ directly -- confirmed
+  # live that go-mode.el registers a magic-mode-alist predicate
+  # (go--is-go-asm) that activates go-asm-mode instead of plain
+  # asm-mode whenever a .s file's own directory contains any .go file
+  # (it's trying to detect Go's own runtime-assembly convention, where
+  # .s files sit alongside .go sources in the same package directory).
+  # /tmp/smoketest/test.go (this same setup_file, above) triggered
+  # exactly that, silently swapping the major-mode out from under this
+  # fixture -- same class of bug as header-only.h's sibling-file
+  # collision, different mechanism (directory contents vs. same
+  # basename).
+  mkdir -p /tmp/smoketest/asm
+  cat > /tmp/smoketest/asm/test.s <<'EOF'
+.global main
+main:
+    mov $0, %eax
+    ret
 EOF
   cat > /tmp/smoketest/CMakeLists.txt <<'EOF'
 cmake_minimum_required(VERSION 3.10)
@@ -203,10 +235,19 @@ eval_elisp() {
   [[ "$output" =~ "0.1.11" ]]
 }
 
-@test "vcpkg is installed and reports the pinned version (2026.06.24)" {
+@test "vcpkg is installed and runs" {
+  # `vcpkg version` self-reports vcpkg-tool's own build date (e.g.
+  # 2026-05-27-<sha>), NOT the VCPKG_VERSION tag this project actually
+  # pins (2026.06.24) -- those are two independent versioning schemes
+  # (the tool binary vs. the ports registry git tag), confirmed live to
+  # genuinely differ. bootstrap-vcpkg.sh always fetches whatever
+  # vcpkg-tool release is current, which this Dockerfile doesn't pin at
+  # all, so asserting a specific tool-binary version here was never
+  # actually testing something this project controls -- check that it
+  # runs and self-identifies instead.
   run vcpkg version
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "2026.06.24" ]]
+  [[ "$output" =~ "vcpkg package management program version" ]]
 }
 
 @test "conan is installed and reports the pinned version (2.30.0)" {
@@ -279,6 +320,20 @@ eval_elisp() {
   [ "$status" -eq 0 ]
   run lldb-dap --version
   [ "$status" -eq 0 ]
+}
+
+@test "fish, fish-lsp, and asm-lsp are installed" {
+  run fish --version
+  [ "$status" -eq 0 ]
+  run fish-lsp --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "1.1.4" ]]
+  # asm-lsp is a clap subcommand CLI with no top-level --version flag
+  # (confirmed live: `asm-lsp --version` errors "unexpected argument");
+  # `asm-lsp version` is its own dedicated subcommand for this.
+  run asm-lsp version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.10.1" ]]
 }
 
 @test "opening a .bash file activates sh-mode with the bash dialect" {
@@ -387,7 +442,7 @@ eval_elisp() {
 }
 
 @test "opening a .h file activates c-mode (Doom's default header fallback)" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.h") (symbol-name major-mode))'
+  run eval_elisp '(progn (find-file "/tmp/smoketest/header-only.h") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "c-mode" ]]
 }
@@ -538,6 +593,31 @@ eval_elisp() {
   [[ "$output" =~ "c++-mode" ]]
 }
 
+# Regression test for a real bug: dape's own built-in gdb config never
+# listed asm-mode (only c-mode/c++-mode/hare-mode variants), and
+# +dape-resolve-cwd's fallback (dape-command-cwd) resolved to the
+# broken "//" for any file with no Cargo.toml/CMakeLists.txt anywhere
+# up its directory tree -- gdb then silently never found the relative
+# :program "a.out", every breakpoint sat pending forever, and the
+# adapter's own output buffer stayed completely empty (no error, just
+# nothing). Confirmed live on the aarch64 tree, end to end, after both
+# fixes: assembling a real aarch64 binary with debug symbols, setting a
+# breakpoint via dape-breakpoint-toggle, launching dape's gdb config,
+# and stepping through it -- execution stopped at the exact breakpoint
+# line, w0/w1 showed the correct pre-computed values (5, 10), and w2
+# correctly showed 15 after stepping over the add instruction.
+@test "dape's built-in gdb debug config covers asm-mode (:tools debugger)" {
+  run eval_elisp '(progn (require (quote dape)) (memq (quote asm-mode) (plist-get (alist-get (quote gdb) dape-configs) (quote modes))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "asm-mode" ]]
+}
+
+@test "+dape-resolve-cwd falls back to the buffer's own directory, not the broken dape-command-cwd root-walk" {
+  run eval_elisp '(progn (require (quote dape)) (find-file "/tmp/smoketest/asm/test.s") (string= (+dape-resolve-cwd) (file-name-directory (buffer-file-name))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "t" ]]
+}
+
 @test "dape's built-in lldb-dap debug config covers rustic-mode (:tools debugger)" {
   run eval_elisp '(progn (require (quote dape)) (let ((modes (plist-get (alist-get (quote lldb-dap) dape-configs) (quote modes)))) (list (memq (quote rustic-mode) modes) (memq (quote rust-mode) modes))))'
   [ "$status" -eq 0 ]
@@ -645,6 +725,68 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/CMakeLists.txt") (list (key-binding (kbd "SPC m b c")) (key-binding (kbd "SPC m b b")) (key-binding (kbd "SPC m b r")) (key-binding (kbd "SPC m b d"))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(+cmake/configure +cmake/build +cmake/rebuild +cmake/clean)" ]]
+}
+
+@test "opening a .fish file activates fish-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.fish") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "fish-mode" ]]
+}
+
+@test "fish-lsp connects for fish-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.fish")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "fish-lsp" ]]
+}
+
+@test "fish localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.fish") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+@test "fish-indent is apheleia's default formatter for fish-mode" {
+  run eval_elisp '(progn (require (quote apheleia)) (symbol-name (alist-get (quote fish-mode) apheleia-mode-alist)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "fish-indent" ]]
+}
+
+@test "opening a .s file activates asm-mode" {
+  # Regex anchored to the literal quoted string, not a bare substring
+  # match -- "go-asm-mode" (go-mode.el's own derived mode, see
+  # setup_file's comment on why this fixture lives in its own asm/
+  # subdirectory) also contains "asm-mode" as a substring, so a loose
+  # match here would silently false-pass even if go-mode's directory-
+  # sniffing regressed and hijacked this buffer again.
+  run eval_elisp '(progn (find-file "/tmp/smoketest/asm/test.s") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ \"asm-mode\" ]]
+}
+
+@test "asm-lsp connects for asm-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/asm/test.s")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "asm-lsp" ]]
+}
+
+# Perl deliberately stays syntax-only (no LSP, no localleader) -- perl-mode
+# and the .pl/.pm auto-mode-alist mapping both ship built into Emacs core
+# already, so this only needs to confirm the built-in default still holds,
+# not that anything was wired up.
+@test "opening a .pl file activates perl-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.pl") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "perl-mode" ]]
 }
 
 @test "Doom loaded without error (nonzero package/module count)" {

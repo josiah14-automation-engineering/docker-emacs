@@ -2595,3 +2595,211 @@ model -- host-bridged by default (shared store, persistent installs,
 survives container restarts) with a same-session fallback to fully
 self-contained if the host's Guix is ever missing, corrupt, or
 mid-upgrade, via one env var (`MOUNT_HOST_GUIX=0`).
+
+#### Fish, Assembly, and Perl -- the "syntax-only batch" upgraded to full LSP (mostly)
+
+Two of the three ended up with real language servers rather than the
+plain syntax-highlighting ROADMAP originally scoped, once research
+turned up genuine, actively-maintained LSP options for both. Perl
+stayed deliberately syntax-only by explicit request ("I hate Perl, code
+in it is usually a mess, I want to discourage Perl use").
+
+**Fish**: `fish-mode` (wwwjfy/emacs-fish, `packages.el`) self-registers
+`.fish`/the `fish` interpreter shebang via its own `;;;###autoload`
+cookies -- no manual `auto-mode-alist` wiring needed. `fish-lsp`
+(ndonfris/fish-lsp, npm) has no built-in `lsp-mode` client, so
+`fish-config.el` registers it by hand (`lsp-register-client` +
+`lsp-stdio-connection '("fish-lsp" "start")`). Formatting needed no
+override: apheleia already defaults `fish-mode` to its own
+`fish-indent` formatter (`fish_indent`), confirmed directly from
+`apheleia-formatters.el`'s source.
+
+**Assembly**: `asm-lsp` (bergercookie/asm-lsp) turned out to have a
+built-in `lsp-mode` client already (`clients/lsp-asm.el`, activates for
+stock `asm-mode` out of the box) -- `asm-config.el` just forces its
+lazy `(require 'lsp-asm)` inside `(after! lsp-mode ...)`, the same
+shape `nu-config.el` already established for `lsp-nushell`. No Doom
+`:lang asm` module exists (confirmed against the pinned commit's
+`modules/lang/` tree), and none was needed: `asm-mode` ships built into
+Emacs core with `.s`/`.S`/`.asm` already in the default
+`auto-mode-alist`.
+
+**Per-tree Dockerfile divergence, not a copy-paste**: asm-lsp has no
+Linux/aarch64 prebuilt release (confirmed against the actual GitHub
+release assets -- only `aarch64-apple-darwin`, `x86_64-apple-darwin`,
+`x86_64-unknown-linux-gnu`), so the aarch64 tree installs it via
+`cargo install asm-lsp --locked --version 0.10.1` after the Rust step.
+First attempt failed outright: `openssl-sys` (a transitive dependency)
+needs `pkg-config` to even locate `libssl-dev`, neither of which were
+in the apt list -- added both, confirmed the rebuild then succeeds.
+x86_64 *does* have a published Linux binary, so that tree uses the
+prebuilt-tarball pattern instead (matching ruff/stylua), with zero
+Rust-toolchain coupling and zero extra apt packages.
+
+**A CLI-shape gotcha, caught by a version-check test that failed for
+the right reason**: `asm-lsp --version` errors ("unexpected argument")
+-- it's a clap subcommand CLI (`gen-config`/`info`/`version`/`help`),
+not a flat `--version` flag. `asm-lsp version` is the actual
+subcommand. Confirmed directly rather than guessed before fixing the
+smoketest assertion.
+
+**A real, deterministic bug found by the smoketest itself, not a
+flake**: `asm-lsp connects for asm-mode buffers` failed consistently,
+twice, in the full suite, despite the exact same assertion passing in
+3 seconds against an isolated container with nothing else running.
+Root-caused live by keeping a daemon alive past test failure (a
+temporary `teardown_file` override) and inspecting it directly:
+the buffer's *actual* major-mode was `go-asm-mode`, not `asm-mode`.
+`go-mode.el` registers a `magic-mode-alist` predicate
+(`go--is-go-asm`) that activates `go-asm-mode` instead of plain
+`asm-mode` whenever a `.s` file's own directory contains any `.go`
+file -- it's trying to detect Go's own runtime-assembly convention,
+where `.s` files sit alongside `.go` sources in the same package
+directory. `magic-mode-alist` is checked *before* `auto-mode-alist` in
+Emacs's mode-selection order, so the extension mapping (which still
+correctly says `.s` -> `asm-mode`, confirmed directly) never even gets
+reached. `/tmp/smoketest/test.go` (this same fixture directory, added
+for the Go language tests) was silently hijacking every `.s` file
+opened anywhere else in that directory. Fixed by moving the assembly
+fixture into its own `/tmp/smoketest/asm/` subdirectory -- `go--is-go-
+asm` only inspects the file's *immediate* directory, so isolating it
+sidesteps the collision entirely. Also tightened the mode-activation
+test's regex to the literal quoted string (`\"asm-mode\"`) rather than
+a bare substring match: `"go-asm-mode"` contains `"asm-mode"` as a
+substring, meaning that test had been silently false-passing the whole
+time this bug was live, only exposed once the LSP-connection test
+(which checks the *server-id*, not the mode string) failed for real.
+
+**Same class of bug, smaller blast radius, found by an explicit ask to
+stop tolerating cosmetic test failures**: two long-pre-existing smoketest
+failures (`vcpkg` version, `.h` file mode) turned out to be genuine,
+fixable test bugs rather than real product gaps:
+- `vcpkg version` self-reports vcpkg-tool's own build date (e.g.
+  `2026-05-27-<sha>`), not the `VCPKG_VERSION` ports-registry tag this
+  project actually pins (`2026.06.24`) -- two independent versioning
+  schemes that happen to look similar. `bootstrap-vcpkg.sh` always
+  fetches whatever vcpkg-tool release is current, which this Dockerfile
+  never pins at all, so asserting a specific tool-binary version was
+  never actually testing something this project controls. Rewritten to
+  check it runs and self-identifies, not a hardcoded version.
+- Opening `test.h` reliably activated `c++-mode`, not `c-mode`, once
+  a same-basename `test.cpp` sibling existed in the same directory
+  (confirmed live, isolated: with no `test.cpp` sibling, a fresh `.h`
+  file reliably gets `c-mode`) -- Emacs's own `c-or-c++-mode` ambiguous-
+  header heuristic disambiguates via a same-basename source-file
+  sibling when one exists, the same *kind* of directory/sibling-content
+  sniffing as `go--is-go-asm` above, different trigger (basename match
+  vs. any `.go` file present). Fixed by renaming the fixture to
+  `header-only.h`, a basename with no `.c`/`.cpp` sibling anywhere in
+  the directory.
+
+Both were genuinely order/fixture-sensitive, not flaky in the random
+sense -- same inputs, same deterministic wrong answer, every time.
+Neither was a bug in the actual IDE config; both were smoketest
+fixtures unintentionally interfering with each other by sharing one
+flat `/tmp/smoketest/` directory across every language's test files.
+
+Full smoketest, all fixes applied: 86/86, zero pre-existing failures
+remaining.
+
+#### Fish and Assembly: don't assume LSP/debugger work, verify live -- one real bug found in each
+
+Prompted directly: "fully test the Fish and Asm integrations, don't
+assume they're working. Make sure LSP and the debugger work." Driven
+entirely via `emacs --daemon` + `emacsclient --eval` (headless, no
+display attached) rather than bats, since verifying real completion
+lists/register state needs more than pass/fail assertions.
+
+**Fish LSP, fully verified**: `textDocument/completion` on a real
+buffer returned `("grep" "greet")` for the prefix `gre` -- `greet` is a
+function *defined earlier in the same buffer*, proving semantic
+analysis, not a static keyword list. Hover on `echo` returned real
+content (command name + doc link), though the detailed man-page body
+is degraded to Ubuntu's "minimized system" placeholder -- this image
+has no `man-db` installed, a real but minor gap, left as-is rather than
+adding a package just for fuller hover text. Diagnostics correctly
+caught both a real syntax error ("missing closing token," an unclosed
+`if`) and a semantic warning ("Unused local function 'greet'").
+
+**Fish debugging**: no dape/DAP adapter exists for fish scripts
+(confirmed: no `clients/lsp-fish`-equivalent in dape, and `fish-mode.el`
+has zero REPL/inferior-process integration). Fish's own `breakpoint`
+builtin is the real mechanism here (same shape as Ruby's `pry`) --
+verified live via a `pty.fork()`-driven interactive fish session that
+it genuinely works: `BP <function>:<line> >` is a real halting prompt,
+variables are inspectable at it (`echo $x` -> `10`), and `exit` (not
+`continue` -- that's fish's *loop* keyword, confirmed live it errors
+"while not inside of loop") correctly resumes execution with the rest
+of the function completing normally. One real, upstream limitation
+found and confirmed against a matching open GitHub issue
+(fish-shell/fish-shell#4823, open since the 2.7.1 era, "fish-future"
+milestone, unfixed): `breakpoint` only works when the containing
+function is *called as an interactive command at the prompt* -- it
+does **not** pause when running a script file directly
+(`fish script.fish`) or when `source`d into an interactive session,
+both confirmed to run straight through with zero pause. Not a gap in
+this project's own wiring -- a real, long-standing fish-shell bug.
+
+**Assembly LSP, fully verified**: `textDocument/completion` returned
+1301 real candidates (confirmed `"mov"` present among them), full ARM64
+mnemonics plus GAS directives (`.cfi_*`, `.p2align`, etc.). Hover on
+`mov` returned the complete ISA reference -- every real alias/variant
+(scalar, SVE, SIMD, tile-to-vector...), not a stub. Diagnostics on a
+genuinely invalid mnemonic correctly fired via both `as` ("unknown
+mnemonic") and clang ("unrecognized instruction mnemonic") -- asm-lsp's
+documented behavior of trying gcc then clang, confirmed live.
+
+**Assembly debugging: two real bugs found and fixed, not one.** First:
+dape's own built-in `gdb` config never listed `asm-mode` in its
+`modes` (only C/C++/hare variants) -- added it (see the earlier
+`MOUNT_HOST_GUIX`-era commit's dape-config.el change, since folded into
+the shared `:program` dolist to stay DRY rather than a separate
+`when-let*` block, per direct feedback). Second, deeper bug, found only
+by actually trying to launch a real debug session rather than just
+checking the `modes` list: `+dape-resolve-cwd`'s fallback
+(`dape-command-cwd`, the same broken `project-current` chain already
+documented above for Rust/Go/C) resolves to the literal string `"//"`
+when *no* project-manifest marker (`Cargo.toml`/`CMakeLists.txt`)
+exists anywhere up the directory tree at all -- not just the wrong
+root, a genuinely broken one. gdb then silently never finds the
+relative `:program "a.out"` at `//a.out`, every breakpoint sits
+"pending" forever, and the adapter's own output/events buffers stay
+completely empty -- no error surfaces anywhere, it just silently never
+runs. Every other language routing through this shared resolver always
+has a manifest file (that's the normal case for C/Rust projects);
+assembly, having no manifest convention at all, is the first to hit the
+"zero markers anywhere" path. Fixed the same way `+dape-lua-cwd`
+already handled the identical class of problem for Lua: fall back to
+the buffer's own directory instead of trusting the project-root guess
+at all, since a manifest-less file shouldn't route through project-root
+guessing in the first place.
+
+Confirmed live, full cycle, after both fixes: assembled a real aarch64
+ELF with debug symbols (`as -g`), set a breakpoint on `add w2, w0, w1`
+via `dape-breakpoint-toggle`, launched dape's `gdb` config -- execution
+stopped at exactly that line (confirmed via `dape--overlay-arrow-position`
+matching the exact source text), `*dape-info Scope*` showed `w0 5`/`w1
+10` (the program's own prior `mov` values, correct before the `add`
+executes), stepped over the instruction via `dape-next`, and `w2`
+correctly showed `15`. Two regression tests added to `smoketest.bats`
+covering both fixes (the `modes` list, and `+dape-resolve-cwd`'s
+fallback value directly) rather than relying only on this one manual
+verification.
+
+One real methodology trap along the way, worth recording: several
+early attempts to drive `dape` non-interactively appeared to hang or
+silently fail to launch the target binary. Root cause turned out to be
+mostly self-inflicted -- a fresh container's Emacs daemon spends its
+first real seconds burning CPU on Doom's own async native-compilation
+backlog (`yasnippet`/`smartparens`/`dash`/`evil-collection` .el files
+compiling in parallel `emacs -Q --batch` subprocesses), starving the
+single-threaded main Emacs of the cycles it needs to process dape's own
+async DAP responses -- checking too soon after launching looked exactly
+like a real hang. Separately, simulating the *interactive* `M-x dape`
+minibuffer prompt via `minibuffer-with-setup-hook` without also sending
+a terminating RET left a real stuck recursive-edit; driving it via
+`(dape (dape--config-eval 'gdb nil))` directly (bypassing the
+interactive prompt machinery entirely) was both simpler and more
+reliable for scripted verification.
+
+Full smoketest after all of this: 88/88.

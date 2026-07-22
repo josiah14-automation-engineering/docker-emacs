@@ -47,6 +47,8 @@ ARG LOCAL_LUA_DEBUGGER_VERSION=release-0.3.3
 ARG RUFF_VERSION=0.15.22
 ARG RUFF_SHA256=d535a4be6504146e757eff67b992f11a293a7a108be22e2a5898b32c32565996
 ARG RUST_VERSION=1.97.1
+ARG ASM_LSP_VERSION=0.10.1
+ARG ASM_LSP_SHA256=2a2f386c10348e365df484d5c66d084813e7dbf8ab4e9eb7a7cc0bb0acf2f8f8
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -167,6 +169,16 @@ RUN apt-get update -y && \
       npm \
       shellcheck \
       zsh \
+      `# fish itself (the shell) -- fish-lsp (npm, below) execs it for` \
+      `# analysis; fish-mode/fish-lsp wiring lives in packages.el/` \
+      `# fish-config.el/fish-keybindings.el. perl deliberately gets no` \
+      `# entry here -- it's already a transitive dependency of something` \
+      `# else in this list (confirmed live on the aarch64 tree: /usr/bin/` \
+      `# perl present in a built image with no explicit perl package` \
+      `# anywhere), and perl-mode + the .pl/.pm auto-mode-alist mapping` \
+      `# both ship built into Emacs core already -- syntax-only is a` \
+      `# deliberate scope choice here, not a gap to fill in later.` \
+      fish \
       `# --- c/c++/cmake ide ---` \
       `# ccls deliberately excluded: no apt package, no prebuilt release` \
       `# binaries -- building it from source against a matching libclang` \
@@ -285,7 +297,8 @@ RUN npm install -g \
       typescript-language-server@5.3.0 \
       typescript@6.0.3 \
       prettier@3.9.5 \
-      oxlint@1.74.0
+      oxlint@1.74.0 \
+      fish-lsp@1.1.4
 RUN gem install --no-document ruby-lsp:0.24.1 rubocop:1.88.2 bundler
 
 # ruby-lsp's exe/ruby-lsp (see its own source) only runs its internal
@@ -592,6 +605,23 @@ RUN curl -fsSL "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSI
 # ruff-pyproject.toml's own header comment for the exact mechanism.
 COPY --chown=${USERNAME}:${USERNAME} ruff-pyproject.toml /home/${USERNAME}/.config/ruff/pyproject.toml
 
+# asm-lsp (bergercookie/asm-lsp) -- a single self-contained binary (Rust)
+# here, same prebuilt-release pattern as ruff/stylua above: unlike the
+# aarch64/M2 tree (whose Linux target has no prebuilt release at all, so
+# that Dockerfile installs it via `cargo install` instead), this
+# x86_64-unknown-linux-gnu target IS published, so no Rust toolchain
+# dependency is needed here at all -- installed before the Rust section
+# below on purpose, since it has nothing to do with it. lsp-mode's own
+# built-in asm-lsp client (asm-config.el's `(require 'lsp-asm)') finds it
+# via `executable-find', same as every other language server in this
+# image. Diagnostics come from asm-lsp invoking gcc/clang directly (both
+# already installed for C/C++), not a separate linter.
+RUN curl -fsSL "https://github.com/bergercookie/asm-lsp/releases/download/v${ASM_LSP_VERSION}/asm-lsp-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/asm-lsp.tar.gz \
+    && echo "${ASM_LSP_SHA256}  /tmp/asm-lsp.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/asm-lsp.tar.gz -C /home/${USERNAME}/.local/bin \
+    && chmod +x /home/${USERNAME}/.local/bin/asm-lsp \
+    && rm -f /tmp/asm-lsp.tar.gz
+
 # Rust gets full IDE support, same presumption as Go: real projects, not
 # glue scripts. rustup (not apt) pins the toolchain to one exact version;
 # rust-analyzer/rustfmt/clippy are rustup components, landing alongside
@@ -627,6 +657,9 @@ COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} bats-config.el        /home/${USERNAME}/.config/doom/bats-config.el
 COPY --chown=${USERNAME}:${USERNAME} all-lisps-config.el   /home/${USERNAME}/.config/doom/all-lisps-config.el
 COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.config/doom/guile-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} fish-keybindings.el   /home/${USERNAME}/.config/doom/fish-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} fish-config.el        /home/${USERNAME}/.config/doom/fish-config.el
+COPY --chown=${USERNAME}:${USERNAME} asm-config.el         /home/${USERNAME}/.config/doom/asm-config.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
 COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el

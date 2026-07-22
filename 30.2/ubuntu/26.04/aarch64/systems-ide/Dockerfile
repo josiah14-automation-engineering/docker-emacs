@@ -182,6 +182,16 @@ RUN apt-get update -y && \
       npm \
       shellcheck \
       zsh \
+      `# fish itself (the shell) -- fish-lsp (npm, below) execs it for` \
+      `# analysis; fish-mode/fish-lsp wiring lives in packages.el/` \
+      `# fish-config.el/fish-keybindings.el. perl deliberately gets no` \
+      `# entry here -- it's already a transitive dependency of something` \
+      `# else in this list (confirmed live: /usr/bin/perl 5.40.1 present` \
+      `# in a built image with no explicit perl package anywhere), and` \
+      `# perl-mode + the .pl/.pm auto-mode-alist mapping both ship built` \
+      `# into Emacs core already -- syntax-only is a deliberate scope` \
+      `# choice here, not a gap to fill in later.` \
+      fish \
       `# --- c/c++/cmake ide ---` \
       `# ccls deliberately excluded: no apt package, no prebuilt release` \
       `# binaries -- building it from source against a matching libclang` \
@@ -216,6 +226,14 @@ RUN apt-get update -y && \
       `# below, pinned, not apt. Plain lldb package already ships` \
       `# /usr/bin/lldb-dap, which dape has a built-in rust-mode config for.` \
       lldb \
+      `# --- assembly ide (asm-lsp build deps) ---` \
+      `# asm-lsp (installed via cargo below, no aarch64-linux prebuilt` \
+      `# release exists) pulls in openssl-sys transitively -- confirmed` \
+      `# live: without these two, its build fails with "Could not find` \
+      `# directory of OpenSSL installation" (pkg-config missing entirely,` \
+      `# so it can't even locate libssl to fail more specifically).` \
+      libssl-dev \
+      pkg-config \
       `# --- lua ide ---` \
       `# lua-language-server and stylua are prebuilt release binaries,` \
       `# installed below -- only the interpreter itself comes from apt.` \
@@ -295,7 +313,8 @@ RUN npm install -g \
       typescript-language-server@5.3.0 \
       typescript@6.0.3 \
       prettier@3.9.5 \
-      oxlint@1.74.0
+      oxlint@1.74.0 \
+      fish-lsp@1.1.4
 RUN gem install --no-document ruby-lsp:0.24.1 rubocop:1.88.2 bundler
 
 # ruby-lsp's exe/ruby-lsp (see its own source) only runs its internal
@@ -611,6 +630,20 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && /home/${USERNAME}/.cargo/bin/rustup component add rust-analyzer rust-src rustfmt clippy
 ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
 
+# asm-lsp (bergercookie/asm-lsp) -- installed via cargo (needs the Rust
+# toolchain just installed above, hence living here rather than nearer
+# the C/C++ ide section) rather than a prebuilt release binary: its
+# GitHub Releases page publishes aarch64-apple-darwin, x86_64-apple-
+# darwin, and x86_64-unknown-linux-gnu -- no linux-aarch64 build at all
+# (confirmed directly against the release assets), so this image's
+# target (aarch64 Linux) has no prebuilt option. lsp-mode's own built-in
+# asm-lsp client
+# (asm-config.el's `(require 'lsp-asm)') finds it via `executable-find',
+# same as every other language server in this image. Diagnostics come
+# from asm-lsp invoking gcc/clang directly (both already installed for
+# C/C++), not a separate linter.
+RUN /home/${USERNAME}/.cargo/bin/cargo install asm-lsp --locked --version 0.10.1
+
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 
 COPY --chown=${USERNAME}:${USERNAME} config.el          /home/${USERNAME}/.config/doom/config.el
@@ -636,6 +669,9 @@ COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} bats-config.el        /home/${USERNAME}/.config/doom/bats-config.el
 COPY --chown=${USERNAME}:${USERNAME} all-lisps-config.el   /home/${USERNAME}/.config/doom/all-lisps-config.el
 COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.config/doom/guile-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} fish-keybindings.el   /home/${USERNAME}/.config/doom/fish-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} fish-config.el        /home/${USERNAME}/.config/doom/fish-config.el
+COPY --chown=${USERNAME}:${USERNAME} asm-config.el         /home/${USERNAME}/.config/doom/asm-config.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
 COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el

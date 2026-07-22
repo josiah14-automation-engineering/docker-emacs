@@ -133,6 +133,8 @@
 (load! "lua-config")
 (load! "python-config")
 (load! "ruby-config")
+(load! "fish-config")
+(load! "asm-config")
 (load! "global-keybindings")
 (load! "polyglot-keybindings")
 (load! "sh-keybindings")
@@ -150,3 +152,4 @@
 (load! "typescript-keybindings")
 (load! "rust-keybindings")
 (load! "guile-keybindings")
+(load! "fish-keybindings")

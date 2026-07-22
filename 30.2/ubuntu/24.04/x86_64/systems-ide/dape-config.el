@@ -59,8 +59,25 @@ anything else (e.g. a bare `cc foo.c')."
 
   (dolist (name '(gdb lldb-dap lldb-vscode))
     (when-let* ((config (alist-get name dape-configs)))
-      (setf (alist-get name dape-configs)
-            (plist-put config :program #'+dape-resolve-program))))
+      (setq config (plist-put config :program #'+dape-resolve-program))
+      ;; dape's own built-in `gdb' config hardcodes `modes' to
+      ;; (c-mode c-ts-mode c++-mode c++-ts-mode hare-mode hare-ts-mode) --
+      ;; confirmed directly from dape.el's source -- asm-mode isn't in
+      ;; that list at all, despite gdb being just as real a debugger for
+      ;; hand-written assembly as it is for C (no separate adapter
+      ;; needed; this is exactly the case ROADMAP.md's original Assembly
+      ;; step meant by "no debugger integration needed beyond what gdb
+      ;; already provides," but that claim needed this one line to
+      ;; actually be true). No separate `:program' resolver needed --
+      ;; `+dape-resolve-program' above already falls back to the literal
+      ;; "a.out" default when neither a Cargo.toml nor a CMakeLists.txt
+      ;; is found, the same convention a bare `as -g foo.s -o a.out'
+      ;; assemble-and-link already matches. Only `gdb' gets this --
+      ;; lldb-dap/lldb-vscode are this file's Rust-only adapters (see
+      ;; DECISIONLOG.md), not used for assembly.
+      (when (eq name 'gdb)
+        (setq config (plist-put config 'modes (append (plist-get config 'modes) '(asm-mode)))))
+      (setf (alist-get name dape-configs) config)))
 
   ;; dape's own default `command-cwd' (`dape-command-cwd' -> `project-current')
   ;; determines two things, not just one: it's both the adapter process's
@@ -94,10 +111,20 @@ anything else (e.g. a bare `cc foo.c')."
   ;; to fix root detection globally, same as the `:program' resolvers.
   (defun +dape-resolve-cwd ()
     "Directory containing the nearest Cargo.toml or CMakeLists.txt.
-Falls back to dape's own guess for anything else."
+Falls back to the current buffer's own directory for anything else
+\(e.g. a bare assembly file with no project manifest at all) --
+confirmed live that dape's own guess (`dape-command-cwd', the same
+broken `project-current' chain documented above) resolves to \"//\"
+when *no* marker file exists anywhere up the directory tree, not just
+the wrong root: gdb then looks for the relative `:program' \"a.out\" at
+`//a.out', finds nothing, and every breakpoint sits `pending' forever
+with an entirely empty adapter output buffer -- silent, not an error.
+Same fix shape as `+dape-lua-cwd' below, same reasoning: a file with no
+project manifest to anchor on shouldn't route through project-root
+guessing at all."
     (or (locate-dominating-file default-directory "Cargo.toml")
         (locate-dominating-file default-directory "CMakeLists.txt")
-        (dape-command-cwd)))
+        default-directory))
 
   (defun +dape-go-root ()
     "Directory containing the nearest go.mod, or dape's own guess as fallback."

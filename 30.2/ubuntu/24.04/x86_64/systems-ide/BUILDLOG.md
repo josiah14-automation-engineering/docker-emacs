@@ -2517,3 +2517,122 @@ cleanly, the same way `lsp-auto-guess-root` already does.
 Verified live against Rust, Go, and C's nested flight-test copies after
 the fix: workspace root correctly resolves to each project's own
 directory, not the repo root. Only verified on aarch64 so far.
+
+#### Fish, Assembly, and Perl -- the "syntax-only batch" upgraded to full LSP (mostly)
+
+Source-mirrored from the aarch64 tree (this tree's own image not yet
+rebuilt/tested this session -- deferred on purpose, see
+`project_systems_ide_aarch64` memory). Two of the three ended up with
+real language servers rather than the plain syntax-highlighting
+ROADMAP originally scoped, once research turned up genuine, actively-
+maintained LSP options for both. Perl stayed deliberately syntax-only
+by explicit request ("I hate Perl, code in it is usually a mess, I
+want to discourage Perl use").
+
+**Fish**: `fish-mode` (wwwjfy/emacs-fish, `packages.el`) self-registers
+`.fish`/the `fish` interpreter shebang via its own `;;;###autoload`
+cookies -- no manual `auto-mode-alist` wiring needed. `fish-lsp`
+(ndonfris/fish-lsp, npm) has no built-in `lsp-mode` client, so
+`fish-config.el` registers it by hand (`lsp-register-client` +
+`lsp-stdio-connection '("fish-lsp" "start")`). Formatting needed no
+override: apheleia already defaults `fish-mode` to its own
+`fish-indent` formatter, confirmed directly from `apheleia-
+formatters.el`'s source.
+
+**Assembly**: `asm-lsp` (bergercookie/asm-lsp) turned out to have a
+built-in `lsp-mode` client already (`clients/lsp-asm.el`, activates for
+stock `asm-mode` out of the box) -- `asm-config.el` just forces its
+lazy `(require 'lsp-asm)` inside `(after! lsp-mode ...)`, the same
+shape `nu-config.el` already established for `lsp-nushell`. No Doom
+`:lang asm` module exists, and none was needed: `asm-mode` ships built
+into Emacs core with `.s`/`.S`/`.asm` already in the default
+`auto-mode-alist`.
+
+**Per-tree Dockerfile divergence, not a copy-paste**: unlike the
+aarch64 tree (no Linux/aarch64 prebuilt `asm-lsp` release exists, so it
+builds via `cargo install asm-lsp --locked --version 0.10.1`, needing
+`pkg-config`/`libssl-dev` added for `openssl-sys`), this x86_64 tree
+*does* have a published Linux binary
+(`asm-lsp-x86_64-unknown-linux-gnu.tar.gz`), so it uses the prebuilt-
+tarball pattern instead, matching ruff/stylua -- no Rust-toolchain
+coupling, no extra apt packages.
+
+**A CLI-shape gotcha**: `asm-lsp --version` errors ("unexpected
+argument") -- it's a clap subcommand CLI (`gen-config`/`info`/
+`version`/`help`), not a flat `--version` flag. `asm-lsp version` is
+the actual subcommand. Confirmed directly on the aarch64 build before
+mirroring the smoketest fix here.
+
+**A real, deterministic bug, not a flake, found via the aarch64
+tree's smoketest**: a `.s` file's own directory containing any `.go`
+file causes `go-mode.el`'s own `magic-mode-alist` predicate
+(`go--is-go-asm`) to activate `go-asm-mode` instead of plain
+`asm-mode` -- it's trying to detect Go's own runtime-assembly
+convention, where `.s` files sit alongside `.go` sources in the same
+package directory. This tree's own smoketest fixture directory has
+exactly that (`test.go`, from the Go language tests), so the assembly
+fixture was moved into its own `/tmp/smoketest/asm/` subdirectory to
+sidestep it -- `go--is-go-asm` only inspects the file's immediate
+directory. Also tightened the mode-activation test's regex to the
+literal quoted string (`\"asm-mode\"`) rather than a bare substring
+match, since `"go-asm-mode"` contains `"asm-mode"` as a substring and
+would silently false-pass the same bug again.
+
+**Same class of bug, applied to two longer-standing pre-existing
+failures too, prompted directly**: "let's not have failing tests
+failing for cosmetic reasons, fix the tests so that they aren't
+vulnerable to the same kind of cosmetic quirks in the future." Both
+`vcpkg` (self-reports vcpkg-tool's own build date, not the
+`VCPKG_VERSION` ports-registry tag this project actually pins -- two
+independent versioning schemes) and `.h` file mode (a same-basename
+`test.cpp` sibling makes Emacs's own `c-or-c++-mode` heuristic pick
+`c++-mode` over the intended-to-be-tested `c-mode` fallback) turned out
+to be genuine, fixable test bugs, not real product gaps -- the same
+underlying class as the `go-asm-mode` bug above: a shared flat fixture
+directory where one language's mode-detection heuristic gets confused
+by another language's sibling files. See the aarch64 tree's BUILDLOG.md
+for the full live root-cause trail on all four.
+
+Full smoketest on the aarch64 tree, all fixes applied: 86/86. This
+tree's own image needs its own rebuild + smoketest pass before the same
+claim holds here.
+
+#### Fish and Assembly: LSP/debugger fully verified live on aarch64, source-mirrored here
+
+Prompted directly: "fully test the Fish and Asm integrations, don't
+assume they're working. Make sure LSP and the debugger work." Verified
+entirely on the aarch64 tree (headless `emacs --daemon` +
+`emacsclient --eval`, not this tree's own image). Summary -- full
+detail in the aarch64 tree's BUILDLOG.md:
+
+- **Fish LSP**: real semantic completion (suggests a function defined
+  earlier in the same buffer, not just static keywords), hover (works,
+  degraded man-page detail since this image has no `man-db`), and
+  diagnostics (both syntax and semantic warnings) all confirmed live.
+- **Fish debugging**: no dape/DAP adapter exists for fish scripts.
+  Fish's own `breakpoint` builtin is the real mechanism (like Ruby's
+  `pry`) -- confirmed live it genuinely halts, allows variable
+  inspection, and resumes correctly via `exit` (not `continue`, fish's
+  loop keyword) -- but **only** when the containing function is called
+  interactively at the prompt, not when running a script file directly
+  or `source`ing one. Confirmed as a real, long-standing, open upstream
+  fish-shell bug (fish-shell/fish-shell#4823), not a gap in this
+  project's wiring.
+- **Assembly LSP**: 1301 real completions (`mov` confirmed present),
+  full ISA-reference hover, and compiler-backed diagnostics (both `as`
+  and clang) all confirmed live.
+- **Assembly debugging, two real bugs fixed**: dape's built-in `gdb`
+  config never listed `asm-mode`; separately, `+dape-resolve-cwd`'s
+  fallback resolved to the literal broken string `"//"` for any file
+  with no Cargo.toml/CMakeLists.txt anywhere up its tree (assembly has
+  no manifest convention at all, so it's the first language to hit
+  this path) -- fixed the same way `+dape-lua-cwd` already handles this
+  class of problem for Lua, falling back to the buffer's own directory.
+  Confirmed live on aarch64: assembled a real binary with debug
+  symbols, set a breakpoint, launched dape's gdb config, and stepped
+  through it -- correct register values at every stage. Two regression
+  tests mirrored into this tree's own `smoketest.bats`.
+
+This tree's own image still needs its own rebuild + smoketest pass to
+confirm parity (same deferred status as the rest of this session's
+work here).

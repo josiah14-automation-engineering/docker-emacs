@@ -744,3 +744,62 @@ tool call attempted the broader `enable-local-eval` change.
 **Revisit if:** more `.dir-locals.el` files with `eval` clauses
 accumulate across this project to the point where whitelisting each
 one individually becomes real maintenance overhead.
+
+---
+
+## Fish and Assembly upgraded to full LSP; Perl kept deliberately syntax-only
+
+**Date:** 2026-07-22
+**Status:** Active
+
+**Decision:** Of ROADMAP's original "syntax-only batch" (Fish, Assembly,
+Perl), Fish and Assembly both got full LSP support (`fish-lsp`,
+`asm-lsp`) instead of the originally-scoped plain syntax highlighting.
+Perl stayed syntax-only on purpose.
+
+**Rationale:** Research surfaced real, actively-maintained language
+servers for both Fish and Assembly that this project's own tooling
+(`lsp-mode`) could reach with comparatively little added surface --
+`asm-lsp` even ships a built-in `lsp-mode` client already, needing only
+a forced `require`, no manual client registration. Given that low
+marginal cost, upgrading both was a straightforward call. Perl was the
+opposite: not a technical gap (perl-language-server/PLS options exist)
+but an explicit product decision -- "I hate Perl, code in it is usually
+a mess, I want to discourage Perl use." Kept as-is: `perl` already
+ships as a transitive apt dependency of something else in the image,
+and `perl-mode` + its `.pl`/`.pm` mapping both ship built into Emacs
+core, so "syntax-only" here needed zero code changes at all, not even
+an explicit apt install.
+
+**Per-tree Dockerfile divergence for asm-lsp, not an oversight:**
+aarch64 has no prebuilt Linux/aarch64 `asm-lsp` release (confirmed
+against the actual GitHub release assets), so it's built via `cargo
+install` after the Rust step, needing `pkg-config`/`libssl-dev` added
+to the apt list for `openssl-sys` (confirmed live: the build fails
+without them). x86_64 has a real prebuilt Linux binary, so that tree
+uses the prebuilt-tarball pattern instead, matching ruff/stylua, with
+no Rust-toolchain coupling at all. Two different install mechanisms
+for the same tool, in the two trees, on purpose.
+
+**A process lesson, not just a product one:** two of the three
+version-check tests written for this batch were wrong on first pass
+(`asm-lsp --version` isn't a valid invocation -- it's a clap subcommand
+CLI, needing `asm-lsp version` instead) and the LSP-connection test for
+Assembly failed *consistently* in the full suite while passing in
+isolation -- root-caused to `go-mode.el`'s own `magic-mode-alist`
+predicate (`go--is-go-asm`) silently hijacking `.s` files into
+`go-asm-mode` whenever the same directory holds a `.go` file, which
+this project's own Go fixture (`test.go`) does. Prompted directly:
+"let's not have failing tests failing for cosmetic reasons, fix the
+tests so that they aren't vulnerable to the same kind of cosmetic
+quirks in the future" -- applied to two *other*, longer-standing
+pre-existing failures too (`vcpkg` version string, `.h` file mode),
+both traced to the same underlying class of bug (a shared flat fixture
+directory where one language's mode-detection heuristic gets confused
+by another language's sibling files), not random flakiness. See
+BUILDLOG.md for the full root-cause trail on all four.
+
+**Revisit if:** Perl's "discourage use" framing changes (e.g. if a
+legacy Perl codebase actually needs to be worked on inside this IDE),
+or `asm-lsp`/Rust ships a Linux/aarch64 release, letting that tree
+switch off `cargo install` too.
