@@ -104,3 +104,75 @@ more feature-complete one that needs a fragile, hand-rolled build.
 over the more capable `actboy168/lua-debug` specifically because the
 latter has a dead release pipeline and its own custom build toolchain.
 Same judgment call this project makes repeatedly.
+
+## 11. Shared smoketest fixtures can cross-contaminate mode detection
+
+**Rule:** When a new language's fixture goes into `/tmp/smoketest/`,
+check whether any major-mode heuristic in the image inspects sibling
+files or directory contents (not just the file's own name/extension)
+before assuming a fresh fixture is isolated from every other language's.
+**Why:** `go-mode.el`'s own `magic-mode-alist` predicate
+(`go--is-go-asm`) silently activates `go-asm-mode` instead of plain
+`asm-mode` for any `.s` file whose *directory* contains a `.go` file —
+this repo's own flat fixture directory (holding `test.go` for the Go
+tests) tripped this for the assembly fixture. Separately, Emacs's own
+`c-or-c++-mode` disambiguates an ambiguous `.h` via a same-*basename*
+`.c`/`.cpp` sibling — this repo's own `test.h`/`test.cpp` pair did the
+same thing. Two different mechanisms (directory-content sniffing vs.
+basename matching), same root shape: one language's fixture silently
+breaking another's test. Fix is the same each time — isolate into a
+dedicated subdirectory, or rename off the colliding basename — but the
+bug is easy to mistake for "flaky" rather than 100% deterministic.
+
+## 12. A root/cwd resolver's fallback needs testing as much as its happy path
+
+**Rule:** For any per-language `command-cwd`/root resolver that walks up
+for a marker file (`+dape-resolve-cwd`, `+dape-go-root`, etc.), test the
+*zero-markers-found* case explicitly, not just "marker exists" and
+"wrong marker resolves." Don't assume the existing fallback
+(`dape-command-cwd` or similar) degrades gracefully.
+**Why:** `+dape-resolve-cwd`'s fallback silently resolved to the literal
+broken string `"//"` when no `Cargo.toml`/`CMakeLists.txt` existed
+anywhere up a file's directory tree — not "the wrong root," a
+nonexistent one. gdb then never found the relative `:program "a.out"`,
+every breakpoint sat "pending" forever, and every adapter output/events
+buffer stayed completely empty — no error surfaced anywhere. Every
+language that had already used this resolver (C/C++/Rust) always has a
+manifest file, so this path was never exercised until Assembly (which
+has no manifest convention at all) hit it first.
+
+## 13. Verify a CLI tool's actual invocation shape before writing a test against it
+
+**Rule:** Before asserting `<tool> --version` (or any other flag) in
+`smoketest.bats`, run the tool directly and read its own `--help`/error
+output. Don't assume a flag that works for most CLI tools works for this
+one.
+**Why:** `asm-lsp --version` errors outright ("unexpected argument") —
+it's a clap subcommand CLI (`asm-lsp version`, not a flag) —
+confirmed only by actually running it. Separately, `vcpkg version`
+reports vcpkg-*tool's* own build date, not the `VCPKG_VERSION`
+ports-registry tag this project pins — two different, independently
+versioned things that happen to look like the same kind of "version
+string." Both wrong assumptions would have shipped as permanently
+failing (or permanently wrong-but-passing) tests if not checked live.
+
+## 14. Diagnosing a headless daemon that "isn't doing anything" has two very different causes
+
+**Rule:** When a scripted `emacs --daemon` + `emacsclient --eval`
+sequence appears to hang or silently not launch something, check
+`ps aux` inside the container and the target's own output/events buffers
+directly before concluding it's broken. Don't just wait longer or retry
+blindly.
+**Why:** Two unrelated causes produce the identical symptom in this
+project's own verification workflow: (1) a *genuinely still-working*
+daemon burning its first real seconds on Doom's own async
+native-compilation backlog (several `emacs -Q --batch` subprocesses
+compiling `.el` files in parallel), starving the single-threaded main
+Emacs of cycles to process async responses — looks exactly like a hang
+if checked too soon; (2) a genuinely *stuck* recursive minibuffer edit
+from a test harness that inserted text via `minibuffer-with-setup-hook`
+but never sent a terminating RET — a real bug in the test script, not
+the thing under test. `ps aux` (is the target process actually running
+and in what state?) and reading the relevant `*dape-...*`/`*eval*`
+buffers directly distinguish the two immediately; guessing does not.
+

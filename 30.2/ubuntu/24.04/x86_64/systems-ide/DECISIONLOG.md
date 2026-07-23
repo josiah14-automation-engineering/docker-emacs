@@ -659,3 +659,54 @@ all four.
 legacy Perl codebase actually needs to be worked on inside this IDE),
 or this tree's own image gets rebuilt/smoketested and something here
 doesn't hold on x86_64 the way it did on aarch64.
+
+---
+
+## Haskell: syntax-only in systems-ide, full LSP deferred to its own IDE
+
+**Date:** 2026-07-22
+**Status:** Active
+
+**Decision:** `systems-ide` will not get Haskell Language Server (HLS)
+support. If Haskell is added here at all, it's syntax-only highlighting
+(`haskell-mode`/tree-sitter, no `lsp-mode`, no debugger). Full LSP +
+debugging support belongs in its own dedicated, refreshed IDE image
+instead — reviving the stale `29.2/ubuntu/22.04/x86_64/haskell-ide/` as
+a modern 30.2 build is the likely path, whenever that's picked up.
+
+**Rationale:**
+- This mirrors an existing, already-established pattern in this repo:
+  Mercury, Python, and Scala all get their own per-language IDE
+  directories rather than being folded into a shared polyglot image,
+  specifically because their tooling needs are heavier or more
+  specialized than what a shared image comfortably supports. HLS fits
+  that same shape — multi-package cabal/stack project resolution and
+  tight GHC-version coupling make it a heavier, more failure-prone
+  dependency than the LSP servers already in `systems-ide` (gopls,
+  rust-analyzer, clangd, racket-langserver, etc.), all of which are
+  single-binary or single-package-manager installs with no comparable
+  project-resolution complexity.
+- Concrete, first-hand history, not hypothetical caution: Josiah has
+  had Haskell fully working in a past Doom Emacs configuration before
+  and had it "inexplicably break," with no root cause ever isolated.
+  That's a specific, painful precedent for Haskell tooling in Emacs
+  specifically, distinct from this repo's general "verify before
+  assuming" discipline (see AGENTS.md) — the caution here is earned by
+  a real incident, not applied by default.
+- A dedicated image also isolates the blast radius: if HLS breaks again
+  the way it apparently has before, that's contained to one throwaway
+  IDE image rather than jeopardizing every other language sharing
+  `systems-ide`'s single Doom config and package set.
+
+**Not a factor:** Haskell's standing as a systems-programming language
+in the abstract — that question was settled separately (XMonad is real
+systems evidence; Turtle is shell-scripting-DSL tier, not systems
+evidence) and doesn't change this decision either way. This entry is
+purely about where HLS tooling should live, not whether Haskell
+"counts."
+
+**Revisit if:** `systems-ide` picks up Haskell for real (syntax-only
+first — full LSP still requires deciding whether to revive
+`haskell-ide` or build fresh), or HLS's own reliability/setup story
+changes enough to reopen the "heavier dependency" argument above.
+

@@ -213,30 +213,106 @@ into std, and flycheck errors. Run `rustc --version` inside the container.
 
 ## Step 8: Zig — [#7](https://github.com/josiah14-automation-engineering/docker-emacs/issues/7)
 
-Zig requires a separate build stage to isolate the toolchain download.
+**Currently just a stub, not started**: `zig-keybindings.el` exists but is an
+empty placeholder never actually loaded from `config.el`, and there's no
+`zig` in `init.el`'s `:lang` block or any Zig toolchain install in the
+Dockerfile at all (confirmed directly against all three files in both
+trees, not assumed from this section's old text). This section rewrites
+the plan below with live-verified specifics, replacing the earlier
+generic sketch (which had the `+lsp` recommendation backwards and no
+debugger-integration research at all).
 
-**Dockerfile:**
-- Add `zig-build` stage before the final stage:
-  ```dockerfile
-  FROM ubuntu:24.04 AS zig-build
-  ARG ZIG_VERSION=<pin>
-  ARG ZIG_SHA512=<pin>
-  RUN apt-get update -y && apt-get install -y ca-certificates curl xz-utils ...
-  RUN curl ... | sha512sum -c - && tar -xf ... -C /usr/local/zig
-  ```
-- Add `ZLS_VERSION` and `ZLS_SHA512` ARGs; download ZLS binary alongside Zig
-- In final stage: `COPY --from=zig-build /usr/local/zig /usr/local/zig`
-- Add `/usr/local/zig` to `ENV PATH`
-- Pin versions: check ziglang.org for current stable; ZLS must match Zig version exactly
+**Versions confirmed live today** (mirror.racket-lang.org-style
+paranoia, not trusted from any prior note): Zig 0.16.0 is current
+stable (`ziglang.org/download/index.json`), and ZLS 0.16.0 is the
+exact matching release (`zigtools/zls` GitHub releases) — same
+"LSP version must match the toolchain version exactly" constraint
+this file already flags for Zig. Both publish prebuilt
+`aarch64-linux`/`x86_64-linux` tarballs. Zig's own index.json publishes
+a `shasum` field directly (confirmed by re-downloading and re-hashing:
+`ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17` for
+`zig-aarch64-linux-0.16.0.tar.xz`, matches). ZLS publishes only
+`.minisig` signatures, no plain checksum file (same as lua-language-server/
+stylua elsewhere in this file) — sha256 computed directly against the
+real release assets rather than left as a placeholder:
+`430cd293d201eb70ae2519dbc96c854bf8791b8df7fc9392e8d2dc9680a2bed7`
+(`zls-aarch64-linux.tar.xz`), `ded6d562a0b86ee878b1ddf70ffab2797ce3cdca3b02d6077548f9d56dff96b6`
+(`zls-x86_64-linux.tar.xz`). Re-verify both at actual implementation
+time regardless — these are today's numbers, not a permanent pin.
+
+**Dockerfile — simpler than this section's old sketch, no separate
+build stage needed:** Zig ships as a self-contained directory (the
+`zig` binary plus its own bundled `lib/` standard library sitting next
+to it — not independently relocatable the way a single static binary
+like `ruff`/`stylua` is), so it needs the same "extract whole directory,
+add it directly to PATH" treatment as `lua-language-server` gets below,
+not a symlink into `~/.local/bin` (which would separate the binary from
+the `lib/` it needs beside it). ZLS by contrast *is* a single
+relocatable binary — same `curl | sha256sum -c | tar | install` pattern
+as `ruff`/`stylua`. Go's separate `go-build` stage above is this file's
+oldest pattern and isn't what current single-binary/single-directory
+tools in this Dockerfile do (`nu`/`ruff`/`stylua`/`lua-language-server`
+all install directly in the final stage, post-`USER` switch, no
+isolated build stage) — Zig needs no build stage either, it's just an
+extract, matching the newer/simpler convention rather than the old
+Go-era one.
 
 **init.el:**
-- Add `zig` to `:lang` (no `+lsp` flag needed; Doom's zig module auto-detects zls on PATH)
+- Add `(zig +lsp)` to `:lang` — **correcting this section's earlier
+  claim**: the `+lsp` flag *is* needed and is what Doom's own zig
+  module README explicitly recommends ("It is highly recommended you
+  use this"), it just doesn't gate on a separate flag for zls
+  autodetection the way some other `+lsp`-flagged modules do extra
+  work; the flag still has to be present for LSP to activate at all.
 
-**config.el:**
-- Add `(load! "zig-keybindings")`
+**config.el / packages.el:** Likely nothing, **delete the
+`zig-keybindings.el` stub rather than filling it in** — confirmed
+directly from the pinned Doom commit's `modules/lang/zig/config.el`
+that it already wires a full localleader map (`b` compile, `f`
+zig-format-buffer, `r` run, `t` test-buffer) and its own `flycheck`
+checker (`zig ast-check`) with zero extra config needed, the same "Doom's
+own module is already built out" shape Racket's Step 11.5 found. Verify
+this live before assuming, same as Racket.
+- **Formatting already correct with no override needed:** `zig fmt` is
+  apheleia's own built-in default for `zig-mode`/`zig-ts-mode`
+  (confirmed directly in `apheleia-formatters.el`), and Doom's zig
+  `config.el` explicitly sets `zig-format-on-save nil` "rely on
+  `:editor format` instead" — this image's global `(format +onsave)`
+  flag (`init.el`) already covers it.
+- `+tree-sitter` flag deliberately left off for the same reason Racket
+  left `+hash-lang` off: adds a grammar-compile step and a second mode
+  (`zig-ts-mode`) for no concretely-needed benefit yet; plain
+  `zig-mode` already gets full LSP. Revisit if a real need shows up.
 
-**Verify:** Open a `.zig` file; confirm zls completions. Run `zig version` and
-`zls --version` inside the container.
+**Debugger — two real, concrete gaps, found by reading `dape-config.el`
+directly, not assumed:**
+1. `lldb-dap`/`lldb-vscode`'s `modes` list (set in this file's own
+   `dape-config.el`) has no `zig-mode` entry — same class of gap
+   already fixed for `asm-mode` on the `gdb` config (see this file's
+   own comment there). Needs the same one-line `plist-put` append,
+   scoped to `lldb-dap`/`lldb-vscode` instead of `gdb` (Zig debugging
+   is an lldb job, matching Rust, not a gdb one).
+2. `+dape-resolve-cwd`'s marker list only checks `Cargo.toml`/
+   `CMakeLists.txt` — needs `build.zig` added, or a lone `.zig` file
+   with no `build.zig` anywhere up the tree hits the exact "//"
+   fallback bug this file already documents for Assembly. Separately,
+   `+dape-resolve-program` (cargo → CMake → literal "a.out" fallback)
+   needs a `+dape-zig-program` analog: **unverified hypothesis, confirm
+   live before implementing** — `zig build` conventionally places its
+   output at `zig-out/bin/<artifact-name>` relative to the `build.zig`
+   root, while a lone-file `zig build-exe foo.zig` compile produces
+   `./foo` (source basename, no extension) in the current directory.
+   Don't trust this without running both cases for real, the same
+   "verify a resolver's fallback, not just its happy path" discipline
+   AGENTS.md already calls out.
+
+**Verify:** Open a `.zig` file inside a real `build.zig` project (not
+just a lone file, matching AGENTS.md's "test the nested case on
+purpose" rule); confirm `zig-mode` activates, zls connects
+(`lsp-workspaces`), `zig fmt` format-on-save works via `SPC m f`,
+and a real breakpoint/continue/inspect cycle works through
+`lldb-dap` once the two debugger gaps above are fixed. Run `zig version`
+and `zls --version` inside the container.
 
 ---
 
@@ -519,6 +595,45 @@ limitation above -- don't just confirm "LSP connects." Place a
 `step`/`next`/`finish`/`continue`/`whereami` all work through the REPL
 buffer. Run `crystal --version` and `crystalline --version` inside the
 container.
+
+---
+
+## Step 11.7: Haskell — scope decision, not yet scheduled
+
+No GitHub issue yet. Not part of the current Racket+Rash → Zig →
+Chez/Gambit/Gerbil integration order — raised during Racket/systems-Lisp
+research as a side question ("is Haskell a systems language for this
+project's purposes"), answered with a scope decision rather than an
+implementation plan.
+
+**Decision:** If Haskell is added to `systems-ide` at all, it gets
+syntax-only highlighting (`haskell-mode` or tree-sitter, no LSP). Full
+LSP/debugging (Haskell Language Server) is explicitly **not** planned
+for `systems-ide` — it would instead go into its own dedicated,
+refreshed IDE image, matching this repo's existing pattern of separate
+per-language IDE directories for languages that need a heavier or more
+specialized setup than the polyglot systems-ide gives them (Mercury,
+Python, Scala all already have their own IDE dirs rather than being
+folded into a shared image). A stale `29.2/ubuntu/22.04/x86_64/
+haskell-ide/` already exists in this repo and could be the starting
+point for a modern 30.2 version, whenever this is picked up.
+
+**Why not just add HLS here like every other `+lsp` language:** Josiah
+has had Haskell fully working in a past Doom config before and had it
+"inexplicably break" with no root cause ever found — a real, painful,
+unresolved history specific to Haskell tooling in Emacs, not
+hypothetical caution the way (for instance) format-on-save's Lisp-family
+caution is (see BUILDLOG.md/DECISIONLOG.md's `+onsave` notes). HLS is
+also a heavier, more failure-prone piece of tooling than this image's
+other LSP servers (multi-package cabal/stack project resolution, GHC
+version coupling), which argues for giving it its own isolated,
+purpose-built image rather than folding it into the shared systems-ide
+polyglot image where a break is harder to isolate and rebuild around.
+
+**Verify (whenever this is picked up):** Before doing anything else,
+decide syntax-only vs. reviving `haskell-ide` as a separate build — this
+step should not turn into ad-hoc HLS wiring inside `systems-ide` without
+that decision being revisited first.
 
 ---
 
