@@ -5,6 +5,7 @@ TAG_CPU="${TAG_CPU:-m2}"
 USER="$(whoami)"
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 IMAGE="josiah14/systems-doom-emacs-ide:30.2-${TAG_CPU}-ubuntu-26.04"
+CONTAINER_NAME="doom-systems-ide-aarch64"
 
 test_mode=0
 flight_mounts=()
@@ -244,10 +245,27 @@ exec docker run --rm \
   --security-opt seccomp=unconfined \
   --cap-add SYS_ADMIN \
   --cap-add NET_ADMIN \
-  --name "doom-systems-ide-aarch64" \
+  --name "${CONTAINER_NAME}" \
   -e WAYLAND_DISPLAY \
   -e XDG_RUNTIME_DIR \
   -e GDK_BACKEND=wayland \
+  `# run.sh bind-mounts the host's real XDG_RUNTIME_DIR below (needed for` \
+  `# Wayland forwarding), which means Emacs's own default server socket` \
+  `# path ($XDG_RUNTIME_DIR/emacs/server) is the *same host file* for` \
+  `# every container using this pattern -- confirmed live this causes two` \
+  `# concurrently-running IDE containers (e.g. this one alongside` \
+  `# logic-ide) to silently collide: whichever started first keeps the` \
+  `# real socket, and emacsclient calls against the second container's` \
+  `# own name connect to the first container's Emacs instead, with no` \
+  `# error (see AGENTS.md #15). EMACS_SERVER_NAME is read natively by` \
+  `# Doom's own server config (doom-editor.el, use-package! server) before` \
+  `# it calls server-start; EMACS_SOCKET_NAME is emacsclient's own` \
+  `# matching client-side lookup var (confirmed against the emacsclient` \
+  `# binary's own strings) -- setting both to this container's own name` \
+  `# gives every container using this run.sh a uniquely-named socket in` \
+  `# the same shared directory, with zero mount redesign needed.` \
+  -e EMACS_SERVER_NAME="${CONTAINER_NAME}" \
+  -e EMACS_SOCKET_NAME="${CONTAINER_NAME}" \
   -v "${XDG_RUNTIME_DIR}:${XDG_RUNTIME_DIR}" \
   -v "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro" \
   -v "${HOME}/Development/personal:/home/${USER}/Development/personal" \

@@ -710,3 +710,39 @@ first — full LSP still requires deciding whether to revive
 `haskell-ide` or build fresh), or HLS's own reliability/setup story
 changes enough to reopen the "heavier dependency" argument above.
 
+---
+
+## Concurrent `run.sh` containers: per-container Emacs server names via Doom's own `EMACS_SERVER_NAME`, not a mount redesign
+
+**Date:** 2026-07-23
+**Status:** Active
+
+**Decision:** `run.sh` sets `EMACS_SERVER_NAME` and `EMACS_SOCKET_NAME`
+(both equal to the container's own `--name`, `doom-systems-ide`) as
+cheap insurance, mirrored over from the aarch64 tree's own fix for a
+confirmed bug there.
+
+**Rationale (full detail in the aarch64 tree's own DECISIONLOG.md):**
+the aarch64 tree's `run.sh` bind-mounts the *host's real*
+`XDG_RUNTIME_DIR` for Wayland forwarding, which makes Emacs's default
+server socket the same host file for every container using that
+pattern — confirmed live there that running two such containers
+simultaneously (that image alongside `logic-ide`) causes a silent
+cross-container connection instead of a clean failure. Doom's own
+`EMACS_SERVER_NAME` env var (read before `server-start`, confirmed
+directly in `doom-editor.el`) paired with `emacsclient`'s own matching
+`EMACS_SOCKET_NAME` (confirmed via the binary's own strings) fixes this
+with no mount redesign, by giving each container's server a name that
+can't collide.
+
+**This tree doesn't reproduce the underlying bug**: its own `run.sh`
+forwards the display over X11 (`/tmp/.X11-unix`), not a bind-mounted
+host `XDG_RUNTIME_DIR` — `XDG_RUNTIME_DIR` here is already
+container-local, so there's no shared host file for Emacs's server
+socket to collide on. The env vars were added anyway since they're
+free, harmless, and keep both trees' `run.sh` scripts consistent, not
+because a collision was ever confirmed on this tree.
+
+**Revisit if:** this tree's own display-forwarding mechanism ever
+changes to something that *does* share host state the way the aarch64
+tree's Wayland approach does.

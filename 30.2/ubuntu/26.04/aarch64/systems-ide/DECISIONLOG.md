@@ -854,3 +854,88 @@ first — full LSP still requires deciding whether to revive
 `haskell-ide` or build fresh), or HLS's own reliability/setup story
 changes enough to reopen the "heavier dependency" argument above.
 
+---
+
+## Concurrent `run.sh` containers: per-container Emacs server names via Doom's own `EMACS_SERVER_NAME`, not a mount redesign
+
+**Date:** 2026-07-23
+**Status:** Active
+
+**Decision:** `run.sh` sets `EMACS_SERVER_NAME` and `EMACS_SOCKET_NAME`
+(both equal to the container's own `--name`) rather than redesigning
+the `XDG_RUNTIME_DIR` bind-mount to isolate the Wayland socket
+per-container.
+
+**Rationale:**
+- The actual bug: `run.sh` bind-mounts the *host's real*
+  `XDG_RUNTIME_DIR` into the container at the identical path (needed for
+  Wayland display forwarding), so Emacs's own default server socket
+  (`$XDG_RUNTIME_DIR/emacs/server`) is the same host file for every
+  container using this pattern — confirmed live that running this image
+  alongside `logic-ide` simultaneously causes the second container's
+  `emacsclient` calls to silently reach the *first* container's Emacs
+  instead (`strace`-confirmed: `connect()`/`sendto()` succeed, but no
+  response ever comes back, since the "server" is a different,
+  unrelated, busy Emacs process). See AGENTS.md #15/BUILDLOG.md for the
+  full diagnosis.
+- Two ways to fix this were available: (a) isolate `XDG_RUNTIME_DIR`
+  per-container (bind-mount only the specific Wayland socket file into a
+  private, container-local runtime directory, leaving everything else
+  container-local), or (b) give each container's Emacs server a unique
+  *name* within the still-shared directory. (b) was chosen because it's
+  dramatically simpler and lower-risk: `run.sh` also relies on
+  `XDG_RUNTIME_DIR` for the podman socket bridge
+  (`${XDG_RUNTIME_DIR}/podman/podman.sock`) and potentially other
+  sockets a real user's session may add there over time (pipewire,
+  dbus, etc.) — narrowing the mount to "just the Wayland socket" risks
+  silently breaking one of those, whereas naming the *server* uniquely
+  has no such blast radius and directly targets the actual point of
+  collision (the socket filename), not the whole shared directory.
+- Confirmed this isn't a hand-rolled hack: Doom already reads an
+  `EMACS_SERVER_NAME` environment variable and sets `server-name` from
+  it *before* calling `server-start`, in its own `doom-editor.el`
+  (`use-package! server` block) — this is existing, intentional Doom
+  functionality for exactly this use case, not something bolted on.
+  `emacsclient` itself independently reads a matching `EMACS_SOCKET_NAME`
+  (confirmed directly against the `emacsclient` binary's own strings,
+  not assumed from documentation) for the client-side equivalent of
+  `-s`/`--socket-name`. Together, both env vars set to the same value
+  make every `run.sh`-launched container's Emacs reachable via a bare
+  `emacsclient` call (no `-s` flag needed anywhere else in this
+  project's own scripts/tests) while giving it a name that can never
+  collide with a different IDE image's own container.
+- A first attempt at fixing this via a plain `emacs --eval '(setq
+  server-name "...")'` command-line override (overriding the
+  Dockerfile's default `CMD ["emacs"]`) was tried and confirmed *not*
+  reliable: Emacs processes `--eval` command-line arguments only after
+  the init file has fully loaded, and Doom's own `server-start` call
+  already happens as part of that init sequence — by the time `--eval`
+  runs, the default-named server socket already exists. The
+  `EMACS_SERVER_NAME` env var approach avoids this entirely, since
+  Doom reads it *before* deciding what `server-name` to start with.
+- Value chosen: the container's own `--name` (`doom-systems-ide-aarch64`
+  for this tree). No new naming scheme invented — reusing the value
+  already hardcoded for `--name` keeps this DRY and guarantees the
+  server name is unique across every IDE image in this repo (each has
+  its own distinct `--name`), for free.
+
+**Confirmed live:** with `logic-ide` genuinely running in parallel the
+entire time, a bare `emacsclient --eval "(+ 1 1)"` (no `-s` flag)
+against a freshly `run.sh`-launched systems-ide container responded
+immediately, correctly, every time.
+
+**Scope:** Applied to this tree's own `run.sh` (which reproduces the bug
+— Wayland/shared-`XDG_RUNTIME_DIR`) and mirrored as defensive-but-
+unconfirmed-necessary insurance into the x86_64 tree's `run.sh` (which
+forwards over X11 instead and doesn't bind-mount a shared
+`XDG_RUNTIME_DIR`, so the underlying collision doesn't reproduce there).
+Not applied to any *other* IDE image in this repo (e.g. `logic-ide`,
+which uses the identical shared-`XDG_RUNTIME_DIR` Wayland pattern per
+its own `run.sh`'s comments) — out of scope for this session, and
+touching a script for a container actively in use for unrelated work
+wasn't appropriate to do unprompted.
+
+**Revisit if:** another IDE image in this repo wants the same fix, or a
+future need arises for genuinely isolating (not just uniquely naming)
+each container's runtime directory (e.g. if two containers' *other*
+`XDG_RUNTIME_DIR`-based sockets, not just Emacs's, start colliding too).

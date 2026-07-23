@@ -176,3 +176,45 @@ the thing under test. `ps aux` (is the target process actually running
 and in what state?) and reading the relevant `*dape-...*`/`*eval*`
 buffers directly distinguish the two immediately; guessing does not.
 
+## 15. Two `run.sh`-launched IDE containers running at once collide on the Emacs server socket
+
+**Fixed (2026-07-23) in this project's own `run.sh` scripts** — see
+`run.sh`'s own `EMACS_SERVER_NAME`/`EMACS_SOCKET_NAME` comment for the
+mechanism. Recorded below for the diagnosis, and because any *other*
+IDE's `run.sh` in this repo using the same shared-`XDG_RUNTIME_DIR`
+pattern (e.g. `logic-ide`) hasn't received the equivalent fix and can
+still hit this.
+
+**Rule:** Before diagnosing an `emacsclient`/GUI verification session as
+broken, check `docker ps` for a *second* `run.sh`-launched container
+already running against an IDE whose own `run.sh` bind-mounts the host's
+real `XDG_RUNTIME_DIR` without an `EMACS_SERVER_NAME`-style per-container
+override. If one is, that's the first thing to rule out, not a hung
+Emacs.
+**Why:** Bind-mounting the *host's real* `XDG_RUNTIME_DIR` into the
+container at the identical path (needed for Wayland display forwarding)
+means Emacs's own default server socket
+(`$XDG_RUNTIME_DIR/emacs/server`) is the *same host file* for every
+container using this pattern, not a container-isolated one. Whichever
+container's Emacs starts first keeps the real listening socket; every
+`emacsclient` call against a second, later-started container's own name
+silently connects to the *first* container's Emacs instead — confirmed
+live via `strace`: `connect()`/`sendto()` succeed, but the "server" never
+responds to a request it has no context for (it's busy with unrelated,
+real work in the other container). This looks exactly like a hung/broken
+server, made more confusing by the fact that the GUI window stays fully
+interactive throughout — because that's a *different* container's Emacs
+the whole time, not the one actually being tested. **The actual fix**
+(not a manual `--eval`-and-hope-the-timing-works-out workaround): Doom
+already reads an `EMACS_SERVER_NAME` env var before it ever calls
+`server-start` (`doom-editor.el`'s own `use-package! server` block,
+confirmed directly from source, not assumed) — a plain `--eval`
+override on the emacs command line runs too late to matter, since Doom's
+own init (which calls `server-start` with whatever `server-name` is at
+that point) finishes loading *before* `--eval` command-line arguments are
+processed at all. Set `EMACS_SERVER_NAME` (server-side) and
+`EMACS_SOCKET_NAME` (emacsclient's own equivalent client-side lookup var,
+confirmed by grepping the actual `emacsclient` binary's strings) to the
+same value as the container's own `--name`, and every container gets a
+uniquely-named socket in the same shared directory automatically, no
+mount redesign needed.

@@ -4,6 +4,7 @@ set -euo pipefail
 MARCH="${MARCH:-skylake}"
 USER="$(whoami)"
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+CONTAINER_NAME="doom-systems-ide"
 
 flight_mounts=()
 while getopts "f:" opt; do
@@ -167,9 +168,24 @@ docker run --rm \
   --security-opt seccomp=unconfined \
   --cap-add SYS_ADMIN \
   --cap-add NET_ADMIN \
-  --name "doom-systems-ide" \
+  --name "${CONTAINER_NAME}" \
   -e DISPLAY="${DISPLAY}" \
   -v /tmp/.X11-unix:/tmp/.X11-unix \
+  `# This tree forwards its display over X11 (/tmp/.X11-unix), not Wayland/` \
+  `# a bind-mounted host XDG_RUNTIME_DIR the way the aarch64 tree's own` \
+  `# run.sh does -- confirmed live that tree's Wayland approach causes two` \
+  `# concurrently-running IDE containers to collide on Emacs's own default` \
+  `# server socket, since XDG_RUNTIME_DIR (and therefore` \
+  `# $XDG_RUNTIME_DIR/emacs/server) is the same host file for every such` \
+  `# container (see AGENTS.md #15). This tree's XDG_RUNTIME_DIR is` \
+  `# whatever the container resolves internally, not bind-mounted from the` \
+  `# host, so that specific collision doesn't reproduce here -- these two` \
+  `# env vars are added as cheap, harmless insurance anyway (Doom's own` \
+  `# server config reads EMACS_SERVER_NAME before calling server-start;` \
+  `# emacsclient itself reads EMACS_SOCKET_NAME), not a fix for a bug` \
+  `# confirmed on this tree.` \
+  -e EMACS_SERVER_NAME="${CONTAINER_NAME}" \
+  -e EMACS_SOCKET_NAME="${CONTAINER_NAME}" \
   -v "${HOME}/.gitconfig:/home/${USER}/.gitconfig:ro" \
   -v "${HOME}/Development/personal:/home/${USER}/Development/personal" \
   "${nix_mounts[@]+"${nix_mounts[@]}"}" \
