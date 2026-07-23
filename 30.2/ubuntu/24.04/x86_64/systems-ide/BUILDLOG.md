@@ -2636,3 +2636,119 @@ detail in the aarch64 tree's BUILDLOG.md:
 This tree's own image still needs its own rebuild + smoketest pass to
 confirm parity (same deferred status as the rest of this session's
 work here).
+
+### 2026-07-22/23 — Racket + Rash added, tenth full-support language
+
+`(racket +lsp)` added to `:lang`, between `(python ...)` and `(ruby +lsp)`.
+Doom's own `lang/racket/config.el` turned out to be as fully built out as
+Guile's own `scheme` module -- a rich localleader map (run, test,
+expand-macro variants, send region/definition/last-sexp to the REPL,
+visit-definition, docs, logger, profiler, unicode input, paren-shape
+cycling), `set-repl-handler!`/`set-lookup-handlers!`, and its own
+`set-formatter!` call wiring `raco fmt` into apheleia -- confirmed live
+on the aarch64 tree that **zero new elisp files were needed**, matching
+the "check before assuming a new `{lang}-keybindings.el` is required"
+habit this file's own Guile/Fish/Assembly entries already established.
+
+**Racket install: official installer, not apt** (apt is several minor
+versions behind current 9.2 stable). `racket-minimal-9.2-x86_64-linux-
+buster-cs.sh`, sha256 `0ca5563c4609cc605aed42aede8401cdef23a368f5403c05be3d81ad4f601cae`
+(re-verified directly against mirror.racket-lang.org, not trusted from
+any earlier note), installed via `--unix-style --dest ~/.local/lib/racket
+--create-dir < /dev/null` -- confirmed live on the aarch64 tree that this
+installer needs nothing beyond stdin redirection to run non-interactively
+(same installer script, just a different published binary per arch, so
+the invocation shape carries over unchanged). `raco pkg install --auto
+--skip-installed racket-langserver rash fmt` installs all three from
+Racket's own package catalog, no separate toolchain.
+
+**The prior session's "Unexpected EOF" mystery (racket-langserver via a
+raw manual `printf | racket --lib racket-langserver` pipe) was fully
+resolved: it was crude, hand-rolled Content-Length framing, not a real
+langserver bug.** Confirmed live (aarch64) via lsp-mode in a real Emacs
+buffer: full server capabilities returned (completion, hover,
+definitions, rename, semantic tokens, formatting), no EOF issue at all
+once a real LSP client does the handshake instead of a manual pipe.
+
+**Rash (willghatch/racket-rash) went from "flag for explicit go/no-go" to
+implemented this session** -- Josiah's call: the maintainer is still
+actively using Rash day-to-day, so its ~2.5yr-stale git activity doesn't
+indicate the same kind of dormancy scsh's real 20-year abandonment does.
+Verified live on aarch64: `#lang rash` files get `racket-mode` via the
+same `.rkt` extension (Rash has no separate extension convention -- its
+own demo scripts are plain `.rkt` files with `#lang rash` inside), and
+racket-langserver's own docs' claim that its analysis is "DrRacket-API-
+generic, unverified for Rash specifically" held up in practice: 1732 real
+completions in a rash buffer, including rash-specific bindings
+(`#%shell-pipeline/default-pipeline-starter`,
+`#%linea-default-line-macro`), not a degraded/inert connection. Real
+Rash pipeline syntax needed correcting mid-session too: `{echo ...}
+{wc -c}` (a guess extrapolated from the `in-dir { ... }` block-syntax
+example) is wrong -- Rash's actual command syntax is bash-like with no
+braces at all (`echo "banana pie" | wc -c`), confirmed directly against
+`racket-rash`'s own scribble docs rather than left as an unverified
+fixture.
+
+**Two real, non-obvious findings from aarch64 GUI verification, neither
+a Racket-langserver bug, both applicable here too:**
+1. `apheleia.el` (the actual formatting *engine*, as opposed to
+   `apheleia-formatters.el`, which just holds default mode/formatter data
+   and loads independently) is lazily autoloaded, and Doom's
+   `set-formatter!` -- the only mechanism that adds `racket-mode`'s
+   `raco-fmt` mapping to `apheleia-mode-alist`, since raco-fmt isn't one
+   of apheleia's own ~100 built-in defaults the way `lua-mode`/`stylua`
+   is -- defers its whole body inside `(after! apheleia ...)`. In a
+   genuinely fresh session, nothing has forced that engine to load yet,
+   so `racket-mode`'s formatter mapping simply doesn't exist until
+   *something* (any apheleia-mode-alist-registered format, on any
+   buffer) triggers the real load first. Not Racket-specific -- confirmed
+   live it identically blocks Lua's already-working `stylua`-via-
+   `+onsave` on a language's very first save of a session too.
+2. Racket's own Doom module claims localleader `f` for
+   `racket-fold-all-tests`, not the generic `apheleia-format-buffer`
+   every other language in this image binds there. Format-on-save itself
+   (`(format +onsave)`, global) still works correctly regardless; only
+   the manual on-demand "format now" shortcut is unavailable for Racket
+   specifically.
+
+**A real, separate infra discovery on the aarch64 tree, unrelated to
+Racket:** running two of this repo's `run.sh`-launched IDE containers at
+once (e.g. that image alongside `logic-ide`, for genuinely parallel
+work) collided their Emacs servers, since that tree's `run.sh` bind-mounts
+the *host's real* `XDG_RUNTIME_DIR` at the identical container path for
+Wayland forwarding, making Emacs's default server socket path the same
+host file for every such container. **Fixed there** (Doom's own
+`EMACS_SERVER_NAME` env var, read before `server-start`, paired with
+`emacsclient`'s own `EMACS_SOCKET_NAME`, both set to the container's
+`--name`) -- see the aarch64 tree's `run.sh`/BUILDLOG.md/AGENTS.md #15
+for the full diagnosis and fix. **This tree doesn't reproduce the
+underlying bug** -- its own `run.sh` forwards the display over X11
+(`/tmp/.X11-unix`), not a bind-mounted host `XDG_RUNTIME_DIR`, so this
+tree's `XDG_RUNTIME_DIR` is already container-local. The same
+`EMACS_SERVER_NAME`/`EMACS_SOCKET_NAME` env vars were still added here
+too, as cheap insurance, not because a collision was ever confirmed on
+this tree.
+
+**Two real, non-Racket bats bugs found and fixed on aarch64 as a
+byproduct of writing Racket's own regression tests, both about test
+methodology, not product bugs, mirrored into this tree's own
+`smoketest.bats` even though not independently re-run here:**
+1. `emacsclient --eval`'s return value is printed via Lisp's `prin1`,
+   which backslash-escapes embedded quotes in strings -- a plain-string
+   content match against a formatter's output needs to account for that
+   (or sidestep it entirely, e.g. via `count-lines`).
+2. `+dape-resolve-cwd`'s own regression test (added last session for
+   Assembly) asserted the "zero markers found anywhere" fallback using
+   `/tmp/smoketest/asm/test.s` -- but `/tmp/smoketest/`'s own
+   `CMakeLists.txt` fixture (there for the C/CMake tests) is a real
+   ancestor `locate-dominating-file` finds from *any* depth underneath
+   it, so that test was silently checking "walks up to the nearest
+   CMakeLists.txt," the opposite of its own name and comment. Fixed by
+   moving the "zero markers" fixture to a genuinely separate top-level
+   root (`/tmp/smoketest-nomarkers/`), not just a deeper subdirectory
+   (which wouldn't have helped -- `locate-dominating-file` walks every
+   ancestor, not just the immediate parent).
+
+Confirmed on aarch64 only: full smoketest 94/94 there. This tree's own
+image still needs its own rebuild + smoketest pass to confirm parity
+(same deferred status as the rest of this session's work here).

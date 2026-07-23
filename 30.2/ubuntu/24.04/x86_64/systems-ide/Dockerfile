@@ -47,6 +47,8 @@ ARG LOCAL_LUA_DEBUGGER_VERSION=release-0.3.3
 ARG RUFF_VERSION=0.15.22
 ARG RUFF_SHA256=d535a4be6504146e757eff67b992f11a293a7a108be22e2a5898b32c32565996
 ARG RUST_VERSION=1.97.1
+ARG RACKET_VERSION=9.2
+ARG RACKET_SHA256=0ca5563c4609cc605aed42aede8401cdef23a368f5403c05be3d81ad4f601cae
 ARG ASM_LSP_VERSION=0.10.1
 ARG ASM_LSP_SHA256=2a2f386c10348e365df484d5c66d084813e7dbf8ab4e9eb7a7cc0bb0acf2f8f8
 ARG DEBIAN_FRONTEND=noninteractive
@@ -631,6 +633,48 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --no-modify-path \
     && /home/${USERNAME}/.cargo/bin/rustup component add rust-analyzer rust-src rustfmt clippy
 ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
+
+# Racket + Rash ide: prefer the official installer over apt, matching this
+# project's general bias (rustup for Rust, pinned binary releases for
+# Nu/ruff/stylua/lua-language-server above) -- apt is several minor
+# versions behind the current 9.2 stable, same "apt is stale" pattern
+# hit with TypeScript/rbs/cmake-language-server elsewhere in this file
+# (see aarch64 tree's Dockerfile for the live-confirmed version check).
+# Installed under the runtime user's own home directory, same reasoning
+# as vcpkg/lua-language-server above: everything from vcpkg onward in
+# this file runs after the USER switch and only has write access within
+# its own home directory. `--unix-style` lays out a normal bin/lib/share
+# tree under `--dest`; `--create-dir` creates that destination since it
+# doesn't exist yet. Confirmed live (throwaway container, aarch64 tree)
+# that the installer exits 0 non-interactively with just `< /dev/null`
+# piped in, no extra flag needed -- same installer script, just a
+# different published binary per arch, so the invocation shape carries
+# over unchanged.
+RUN curl -fsSL "https://mirror.racket-lang.org/installers/${RACKET_VERSION}/racket-minimal-${RACKET_VERSION}-x86_64-linux-buster-cs.sh" -o /tmp/racket-installer.sh \
+    && echo "${RACKET_SHA256}  /tmp/racket-installer.sh" | sha256sum -c - \
+    && chmod +x /tmp/racket-installer.sh \
+    && /tmp/racket-installer.sh --unix-style --dest /home/${USERNAME}/.local/lib/racket --create-dir < /dev/null \
+    && rm /tmp/racket-installer.sh
+ENV PATH="/home/${USERNAME}/.local/lib/racket/bin:${PATH}"
+
+# racket-langserver has no standalone binary -- Doom's own lsp-racket
+# client invokes it as `racket --lib racket-langserver` (confirmed
+# directly from lsp-mode's own clients/lsp-racket.el). rash
+# (willghatch/racket-rash) is this project's actual shell-scripting-DSL
+# answer (scsh ruled out as ~20yr dormant; see ROADMAP.md/DECISIONLOG.md)
+# -- ~2.5yr-stale but not archived, accepted deliberately rather than a
+# clean pass. fmt (raco fmt) is what Doom's own racket module already
+# wires as the mode's formatter via `set-formatter!`, no separate config
+# needed. All three ride on Racket's own package manager, no separate
+# toolchain -- confirmed live (throwaway container, aarch64 tree) all
+# three install and `raco pkg show` reports them correctly, exit 0, and
+# that racket-langserver's completion holds up inside a #lang rash
+# buffer too (1732 real completions returned, including rash-specific
+# bindings), not just plain #lang racket. Not independently re-verified
+# on x86_64 this session -- see BUILDLOG.md/DECISIONLOG.md, this tree's
+# whole rebuild+test pass is deliberately deferred to a dedicated batch
+# later.
+RUN raco pkg install --auto --skip-installed racket-langserver rash fmt
 
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 

@@ -42,6 +42,8 @@ ARG LOCAL_LUA_DEBUGGER_VERSION=release-0.3.3
 ARG RUFF_VERSION=0.15.22
 ARG RUFF_SHA256=54ec426d839d7cea1096e9ea1c5486fd2f3df62ee6cfd71dc090b18f99bebd90
 ARG RUST_VERSION=1.97.1
+ARG RACKET_VERSION=9.2
+ARG RACKET_SHA256=ea43b82866024ec6af1e811e45857ff9859ae0a17a7f21da9c04e60102f621e9
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -643,6 +645,42 @@ ENV PATH="/home/${USERNAME}/.cargo/bin:${PATH}"
 # from asm-lsp invoking gcc/clang directly (both already installed for
 # C/C++), not a separate linter.
 RUN /home/${USERNAME}/.cargo/bin/cargo install asm-lsp --locked --version 0.10.1
+
+# Racket + Rash ide: prefer the official installer over apt, matching this
+# project's general bias (rustup for Rust, pinned binary releases for
+# Nu/ruff/stylua/lua-language-server above) -- apt ships Racket 8.18 on
+# 26.04, several minor versions behind the current 9.2 stable (confirmed
+# live against the real ubuntu:26.04 archive). Installed under the
+# runtime user's own home directory, same reasoning as vcpkg/lua-
+# language-server above: everything from vcpkg onward in this file runs
+# after the USER switch and only has write access within its own home
+# directory. `--unix-style` lays out a normal bin/lib/share tree under
+# `--dest`; `--create-dir` creates that destination since it doesn't
+# exist yet. Confirmed live (throwaway container) that the installer
+# exits 0 non-interactively with just `< /dev/null` piped in, no extra
+# flag needed.
+RUN curl -fsSL "https://mirror.racket-lang.org/installers/${RACKET_VERSION}/racket-minimal-${RACKET_VERSION}-aarch64-linux-buster-cs.sh" -o /tmp/racket-installer.sh \
+    && echo "${RACKET_SHA256}  /tmp/racket-installer.sh" | sha256sum -c - \
+    && chmod +x /tmp/racket-installer.sh \
+    && /tmp/racket-installer.sh --unix-style --dest /home/${USERNAME}/.local/lib/racket --create-dir < /dev/null \
+    && rm /tmp/racket-installer.sh
+ENV PATH="/home/${USERNAME}/.local/lib/racket/bin:${PATH}"
+
+# racket-langserver has no standalone binary -- Doom's own lsp-racket
+# client invokes it as `racket --lib racket-langserver` (confirmed
+# directly from lsp-mode's own clients/lsp-racket.el). rash
+# (willghatch/racket-rash) is this project's actual shell-scripting-DSL
+# answer (scsh ruled out as ~20yr dormant; see ROADMAP.md/DECISIONLOG.md)
+# -- ~2.5yr-stale but not archived, accepted deliberately rather than a
+# clean pass. fmt (raco fmt) is what Doom's own racket module already
+# wires as the mode's formatter via `set-formatter!`, no separate config
+# needed. All three ride on Racket's own package manager, no separate
+# toolchain -- confirmed live (throwaway container) all three install
+# and `raco pkg show` reports them correctly, exit 0, and that
+# racket-langserver's completion holds up inside a #lang rash buffer
+# too (1732 real completions returned, including rash-specific bindings)
+# not just plain #lang racket.
+RUN raco pkg install --auto --skip-installed racket-langserver rash fmt
 
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 

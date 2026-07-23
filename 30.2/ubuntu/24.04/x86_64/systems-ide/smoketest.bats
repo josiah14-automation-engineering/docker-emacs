@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
-# IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Bats + Nushell +
-# C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript glue-script tier +
-# Fish + Assembly + Perl syntax-only).
+# IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Racket + Rash +
+# Bats + Nushell + C/C++/CMake + Lua + Python/Ruby/JavaScript/TypeScript
+# glue-script tier + Fish + Assembly + Perl syntax-only).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -14,7 +14,7 @@
 #
 # Run via: bats smoketest.bats
 # bash-language-server, shellcheck, zshdb, go, gopls, dlv, golangci-lint, bats,
-# nu, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
+# nu, racket, racket-langserver, rash, raco fmt, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
 # lua-language-server, stylua, python3, pyright, ruff, ruby, ruby-lsp,
 # rubocop, typescript-language-server, prettier, oxlint, cargo, rustc,
 # rust-analyzer, rustfmt, clippy, lldb, fish, fish-lsp, asm-lsp are all baked
@@ -72,6 +72,19 @@ EOF
   cat > /tmp/smoketest/test.nix <<'EOF'
 { }
 EOF
+  cat > /tmp/smoketest/test.rkt <<'EOF'
+#lang racket
+(displayln "hi")
+EOF
+  cat > /tmp/smoketest/test-rash.rkt <<'EOF'
+#lang rash
+(displayln "hi")
+EOF
+  cat > /tmp/smoketest/test-fmt.rkt <<'EOF'
+#lang racket
+(displayln
+  "hi")
+EOF
   cat > /tmp/smoketest/test.nu <<'EOF'
 def main [] {
   echo "hi"
@@ -115,6 +128,22 @@ EOF
   # basename).
   mkdir -p /tmp/smoketest/asm
   cat > /tmp/smoketest/asm/test.s <<'EOF'
+.global main
+main:
+    mov $0, %eax
+    ret
+EOF
+  # Separate top-level root, not just a subdirectory of /tmp/smoketest/ --
+  # confirmed live (aarch64 tree) that a subdirectory alone isn't isolation
+  # enough here: locate-dominating-file walks *every* ancestor, and
+  # /tmp/smoketest/'s own CMakeLists.txt fixture (below) is one, so
+  # +dape-resolve-cwd's "zero markers anywhere" case can never actually be
+  # exercised by any file nested under /tmp/smoketest/, no matter how deep --
+  # the exact same class of cross-fixture collision as the go-asm-mode bug
+  # elsewhere in this file, just via ancestor-directory search instead of
+  # same-directory sibling contents.
+  mkdir -p /tmp/smoketest-nomarkers
+  cat > /tmp/smoketest-nomarkers/test.s <<'EOF'
 .global main
 main:
     mov $0, %eax
@@ -410,6 +439,96 @@ eval_elisp() {
   [[ "$output" =~ "nix-mode" ]]
 }
 
+@test "racket is installed and reports the pinned version (9.2)" {
+  run racket --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "9.2" ]]
+}
+
+@test "racket-langserver, rash, and fmt are raco pkg show-visible" {
+  run raco pkg show racket-langserver rash fmt
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "racket-langserver" ]]
+  [[ "$output" =~ "rash" ]]
+  [[ "$output" =~ "fmt" ]]
+}
+
+@test "opening a .rkt file activates racket-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.rkt") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "racket-mode" ]]
+}
+
+@test "racket-langserver connects for racket-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.rkt")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "racket-langserver" ]]
+}
+
+# Not just "does #lang racket work" -- racket-langserver's own docs describe
+# its analysis as working via DrRacket's public API, which is #lang-generic
+# in principle but unverified in practice for a non-core #lang until checked.
+# Confirmed live (see aarch64 tree's ROADMAP.md Step 11.5/DECISIONLOG.md,
+# not independently re-verified on x86_64 this session) that it holds up for
+# #lang rash too, not just degrading to an empty/inert connection.
+@test "racket-langserver also connects for a #lang rash buffer, not just plain #lang racket" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test-rash.rkt")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "racket-langserver" ]]
+}
+
+# Not "does SPC m f resolve to apheleia-format-buffer" -- confirmed live
+# (aarch64 tree) that it doesn't for racket-mode specifically: Doom's own
+# racket module claims localleader "f" for `racket-fold-all-tests`, unlike
+# every other language in this image, so that generic keybinding check
+# (which works fine elsewhere) would be flatly wrong here. Tests the same
+# underlying formatter configuration format-on-save actually uses
+# (`apheleia-mode-alist`'s racket-mode entry, populated by Doom's
+# `set-formatter!` inside racket's `:config` block), invoked directly with
+# a completion callback rather than going through `save-buffer` + guessing
+# how long a real save takes to settle: `set-formatter!` defers its
+# registration inside `(after! apheleia ...)`, so `(require 'apheleia)` up
+# front is what actually populates `apheleia-mode-alist`'s racket-mode
+# entry (confirmed live: without forcing this load, the entry plain
+# doesn't exist yet in a fresh session -- a real, generic laziness quirk,
+# not specific to raco-fmt or this test). A callback-based wait is used
+# instead of polling the buffer's own content for a substring match --
+# confirmed live that `raco fmt`'s actual process runtime varies enough
+# (cold vs. warm racket process, overall system load during a full test
+# run) that guessing a deadline against buffer content is fragile; the
+# callback fires exactly when apheleia itself considers the format done,
+# whatever that took.
+@test "racket format-on-save formatter (raco fmt) actually reformats" {
+  run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test-fmt.rkt")
+    (require (quote apheleia))
+    (let ((done nil))
+      (apheleia-format-buffer
+       (alist-get major-mode apheleia-mode-alist)
+       (lambda (&rest _) (setq done t)))
+      (let ((deadline (+ (float-time) 30)))
+        (while (and (not done) (< (float-time) deadline))
+          (sleep-for 0.2)))
+      (count-lines (point-min) (point-max))))'
+  [ "$status" -eq 0 ]
+  # test-fmt.rkt's deliberately-split call is 3 lines; raco fmt collapses it
+  # to 2 ("#lang racket" + "(displayln \"hi\")"). Checked via line count, not
+  # a string match against emacsclient's own prin1-escaped output (which
+  # backslash-escapes embedded quotes -- confirmed live this made an
+  # otherwise-correct plain-string comparison fail, a test bug, not a real
+  # one).
+  [[ "$output" == "2" ]]
+}
+
 @test "opening a .bats file activates bats-mode with the bash dialect" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.bats") (format "%s %s" major-mode sh-shell))'
   [ "$status" -eq 0 ]
@@ -612,8 +731,17 @@ eval_elisp() {
   [[ "$output" =~ "asm-mode" ]]
 }
 
+# Uses /tmp/smoketest-nomarkers/, not /tmp/smoketest/asm/ -- confirmed live
+# (aarch64 tree) that /tmp/smoketest/asm/test.s doesn't actually exercise
+# the "zero markers anywhere" case this test means to check:
+# /tmp/smoketest/'s own CMakeLists.txt fixture (added for the C/CMake
+# tests) is a real ancestor match `locate-dominating-file` finds regardless
+# of how deep the asm fixture is nested under it, so that path was silently
+# testing "walks up to the nearest CMakeLists.txt," the opposite of what
+# the test claims and not what it's named for -- see setup_file's own
+# comment on /tmp/smoketest-nomarkers/ for the full reasoning.
 @test "+dape-resolve-cwd falls back to the buffer's own directory, not the broken dape-command-cwd root-walk" {
-  run eval_elisp '(progn (require (quote dape)) (find-file "/tmp/smoketest/asm/test.s") (string= (+dape-resolve-cwd) (file-name-directory (buffer-file-name))))'
+  run eval_elisp '(progn (require (quote dape)) (find-file "/tmp/smoketest-nomarkers/test.s") (string= (+dape-resolve-cwd) (file-name-directory (buffer-file-name))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "t" ]]
 }

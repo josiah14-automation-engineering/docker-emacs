@@ -332,7 +332,26 @@ actual x86_64 build + smoketest run confirms it.
 
 ---
 
-## Step 11.5: Racket + Rash
+## ~~Step 11.5: Racket + Rash~~ ✓ CODE COMPLETE (aarch64-verified, x86_64 build-untested)
+
+**Both Racket and Rash implemented on the aarch64 tree and verified live**
+(2026-07-23), source changes mirrored here: `racket-mode` activates for
+both `#lang racket` and `#lang rash` files (same `.rkt` extension),
+`racket-langserver` connects to both (1732 real completions in the rash
+file, including rash-specific bindings — the "does racket-langserver's
+analysis hold up for a non-core #lang" question below is answered yes),
+the REPL runs correctly, and `raco fmt` format-on-save works end-to-end.
+Rash's go/no-go (flagged below) was answered explicitly: implement it,
+per Josiah's call that the maintainer still actively uses it day-to-day,
+unlike scsh's genuine 20-year abandonment. Zero new elisp files needed —
+Doom's own `lang/racket/config.el` was already fully built out, same
+shape as Guile's own `scheme` module. Full details, plus two real
+non-obvious findings (apheleia's lazy engine-load affecting
+first-save-of-a-session for any Doom-customized formatter, and Racket's
+own localleader `f` binding colliding with the generic format keybinding)
+in BUILDLOG.md/DECISIONLOG.md. **This tree's own image still needs its
+own rebuild + smoketest pass** to confirm parity — not yet done, same
+deferred status as the rest of this session's work here.
 
 No GitHub issue yet. Comes after Guile deliberately — same Lisp-family,
 REPL-first philosophy, worth doing back to back (though Racket's own Doom

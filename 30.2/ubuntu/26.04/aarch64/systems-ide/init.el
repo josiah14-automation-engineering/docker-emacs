@@ -59,6 +59,7 @@
        (nix +lsp)
        org
        (python +lsp +pyright)
+       (racket +lsp)
        (ruby +lsp)
        (rust +lsp)
        (scheme +guile)
