@@ -65,6 +65,7 @@
        (scheme +guile)
        (sh +lsp)
        yaml
+       (zig +lsp)
 
        :config
        (default +bindings +smartparens))

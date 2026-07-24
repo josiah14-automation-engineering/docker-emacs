@@ -39,6 +39,16 @@ means invoking the debugger builds first, same as `SPC m b b'."
               (setq program exe)))
           program))))
 
+  (defun +dape--first-executable (dir)
+    "Return the first regular, executable file directly in DIR, or nil.
+Pure directory scan, no build triggered -- shared by any `:program'
+resolver that locates a build's already-built output by looking in a
+known directory, rather than asking the build tool directly the way
+`+dape-cargo-program' can (cargo has no analog for CMake/Zig's own
+fixed build-output directory conventions)."
+    (car (seq-filter (lambda (f) (and (file-regular-p f) (file-executable-p f)))
+                      (directory-files dir t directory-files-no-dot-files-regexp))))
+
   (defun +dape-cmake-program ()
     "Path to the current CMake project's built executable, or nil.
 Unlike cargo, cmake has no single-command way to ask \"what did you
@@ -48,14 +58,37 @@ build; run `SPC m b b' first."
     (when-let* ((root (locate-dominating-file default-directory "CMakeLists.txt"))
                 (build-dir (expand-file-name "build" root))
                 ((file-directory-p build-dir)))
-      (car (seq-filter (lambda (f) (and (file-regular-p f) (file-executable-p f)))
-                        (directory-files build-dir t directory-files-no-dot-files-regexp)))))
+      (+dape--first-executable build-dir)))
+
+  (defun +dape-zig-program ()
+    "Path to the current Zig project's built executable, or nil.
+Mirrors `+dape-cmake-program' above -- `zig build' has no single-command
+way to ask what got built (the output name comes from `build.zig''s own
+`b.addExecutable' call, not reliably derivable from the directory name),
+so this just looks for the one executable file in zig-out/bin, `zig
+build''s own fixed output location (confirmed live). Doesn't trigger a
+build; run `SPC m b' first.
+Falls back to the current buffer's own basename, sans extension, when no
+build.zig exists anywhere up the tree -- confirmed live that a lone-file
+`zig build-exe foo.zig' compile produces `./foo' in the current
+directory, no zig-out/ involved at all. Gated on `zig-mode' specifically
+(unlike the cargo/cmake fallbacks above, which are already marker-gated
+and safely return nil on no match) -- otherwise this fallback would
+return a bogus non-nil path for *any* buffer with no Cargo.toml/
+CMakeLists.txt/build.zig anywhere up its tree, e.g. shadowing asm-mode's
+own \"a.out\" fallback below with a wrong basename-derived guess instead."
+    (if-let* ((root (locate-dominating-file default-directory "build.zig"))
+              (bin-dir (expand-file-name "zig-out/bin" root))
+              ((file-directory-p bin-dir)))
+        (+dape--first-executable bin-dir)
+      (when (and (derived-mode-p 'zig-mode) (buffer-file-name))
+        (file-name-sans-extension (buffer-file-name)))))
 
   (defun +dape-resolve-program ()
     "Resolve the debug target binary for the current project.
-Tries cargo, then CMake; falls back to dape's own \"a.out\" default for
-anything else (e.g. a bare `cc foo.c')."
-    (or (+dape-cargo-program) (+dape-cmake-program) "a.out"))
+Tries cargo, then CMake, then Zig; falls back to dape's own \"a.out\"
+default for anything else (e.g. a bare `cc foo.c')."
+    (or (+dape-cargo-program) (+dape-cmake-program) (+dape-zig-program) "a.out"))
 
   (dolist (name '(gdb lldb-dap lldb-vscode))
     (when-let* ((config (alist-get name dape-configs)))
@@ -78,6 +111,18 @@ anything else (e.g. a bare `cc foo.c')."
       (when (eq name 'gdb)
         (setq config (plist-put config 'modes (append (plist-get config 'modes) '(asm-mode)))))
       (setf (alist-get name dape-configs) config)))
+
+  ;; Same gap class as gdb/asm-mode above: neither lldb adapter's built-in
+  ;; `modes' list includes zig-mode. Zig debugging is an lldb job here,
+  ;; not a gdb one -- matching Rust, not Assembly. This is its own dolist
+  ;; over lldb-dap/lldb-vscode only rather than folded into the gdb dolist
+  ;; above, the same shape as the :disableASLR/:stopOnEntry patches below
+  ;; -- each independent lldb-dap/lldb-vscode-only concern in this file
+  ;; gets its own loop rather than accumulating onto an unrelated one.
+  (dolist (name '(lldb-dap lldb-vscode))
+    (when-let* ((config (alist-get name dape-configs)))
+      (setf (alist-get name dape-configs)
+            (plist-put config 'modes (append (plist-get config 'modes) '(zig-mode))))))
 
   ;; dape's own default `command-cwd' (`dape-command-cwd' -> `project-current')
   ;; determines two things, not just one: it's both the adapter process's
@@ -110,7 +155,7 @@ anything else (e.g. a bare `cc foo.c')."
   ;; directly, bypassing project/projectile entirely rather than trying
   ;; to fix root detection globally, same as the `:program' resolvers.
   (defun +dape-resolve-cwd ()
-    "Directory containing the nearest Cargo.toml or CMakeLists.txt.
+    "Directory containing the nearest Cargo.toml, CMakeLists.txt, or build.zig.
 Falls back to the current buffer's own directory for anything else
 \(e.g. a bare assembly file with no project manifest at all) --
 confirmed live that dape's own guess (`dape-command-cwd', the same
@@ -124,6 +169,7 @@ project manifest to anchor on shouldn't route through project-root
 guessing at all."
     (or (locate-dominating-file default-directory "Cargo.toml")
         (locate-dominating-file default-directory "CMakeLists.txt")
+        (locate-dominating-file default-directory "build.zig")
         default-directory))
 
   (defun +dape-go-root ()

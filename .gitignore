@@ -6,3 +6,5 @@ host/
 **/flight-tests/*/.cache/
 **/flight-tests/*/target/
 **/flight-tests/*/__pycache__/
+**/flight-tests/*/zig-out/
+**/flight-tests/*/.zig-cache/

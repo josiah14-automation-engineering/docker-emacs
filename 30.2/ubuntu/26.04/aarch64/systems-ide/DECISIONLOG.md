@@ -939,3 +939,44 @@ wasn't appropriate to do unprompted.
 future need arises for genuinely isolating (not just uniquely naming)
 each container's runtime directory (e.g. if two containers' *other*
 `XDG_RUNTIME_DIR`-based sockets, not just Emacs's, start colliding too).
+
+---
+
+## Zig's flycheck checker is `lsp` (zls), not Doom's own `zig` (`ast-check`) — no action needed, just a corrected assumption
+
+**Date:** 2026-07-24
+**Status:** Active (informational — no code change resulted from this)
+
+**Finding:** Doom's `lang/zig/config.el` registers its own flycheck
+checker (`zig`, running `zig ast-check`) alongside the `+lsp` flag's
+usual lsp-mode flycheck integration. Confirmed live that
+`flycheck-get-checker-for-buffer` reports `lsp`, not `zig`, in a real
+`zig-mode` buffer with `+lsp` active — the same checker-priority contest
+already documented for ruby-lsp-ls vs. rubocop-ls (see the Ruby entry
+above), just the first time it's shown up between a *syntax-only*
+manual checker and an LSP one rather than two competing LSP servers.
+
+**Why this matters:** `zig ast-check` only validates AST/syntax, not
+semantics (confirmed live: a genuine type error like `const x: i32 =
+"not an int";` exits 0 under `ast-check` alone). The initial
+`flight-tests/zig` fixture and its accompanying comments assumed this
+meant `SPC b c` (flycheck-buffer) in this image would only ever catch
+syntax errors, and documented a workaround note about needing to check
+zls's own diagnostics separately for semantic coverage. That assumption
+was wrong: since `lsp` wins the checker contest, flycheck actually
+surfaces zls's own diagnostics, which are semantically complete —
+confirmed live with both a missing-semicolon syntax error and an
+unused-local semantic error, both correctly reported through the same
+`SPC b c` path.
+
+**No action taken:** this isn't a bug to fix — the *shadowed* `zig`
+checker is harmless dead weight (Doom registers it, `+lsp` outranks it,
+nothing breaks), and the actual observed behavior (full semantic
+diagnostics via flycheck) is strictly better than what was originally
+assumed. Recorded here so a future session doesn't re-litigate "does
+flycheck only catch syntax errors for Zig" from scratch — it doesn't.
+
+**Revisit if:** this image ever drops the `+lsp` flag for zig (unlikely,
+see ROADMAP.md Step 8), at which point the `zig` ast-check checker would
+actually become the active one and the syntax-only limitation would
+apply for real.

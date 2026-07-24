@@ -1,0 +1,12 @@
+.{
+    .name = .flight_test,
+    .version = "0.0.0",
+    .fingerprint = 0x5941236b21c56305,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

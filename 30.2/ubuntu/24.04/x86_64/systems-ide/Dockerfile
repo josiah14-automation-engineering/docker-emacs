@@ -49,6 +49,10 @@ ARG RUFF_SHA256=d535a4be6504146e757eff67b992f11a293a7a108be22e2a5898b32c32565996
 ARG RUST_VERSION=1.97.1
 ARG RACKET_VERSION=9.2
 ARG RACKET_SHA256=0ca5563c4609cc605aed42aede8401cdef23a368f5403c05be3d81ad4f601cae
+ARG ZIG_VERSION=0.16.0
+ARG ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+ARG ZLS_VERSION=0.16.0
+ARG ZLS_SHA256=ded6d562a0b86ee878b1ddf70ffab2797ce3cdca3b02d6077548f9d56dff96b6
 ARG ASM_LSP_VERSION=0.10.1
 ARG ASM_LSP_SHA256=2a2f386c10348e365df484d5c66d084813e7dbf8ab4e9eb7a7cc0bb0acf2f8f8
 ARG DEBIAN_FRONTEND=noninteractive
@@ -676,6 +680,39 @@ ENV PATH="/home/${USERNAME}/.local/lib/racket/bin:${PATH}"
 # later.
 RUN raco pkg install --auto --skip-installed racket-langserver rash fmt
 
+# Zig ships as a self-contained directory (the `zig` binary plus its own
+# bundled `lib/` standard library sitting beside it -- confirmed live via
+# `tar -t` against the real release asset, not independently relocatable
+# the way a single static binary is), so this extracts it whole and adds
+# it to PATH, the same shape as lua-language-server above rather than a
+# symlink into ~/.local/bin (which would separate `zig` from the `lib/`
+# it needs to find beside itself at a fixed relative path).
+# `--strip-components=1` drops the versioned/arch-named top-level dir
+# (`zig-x86_64-linux-0.16.0/`) so the install path stays fixed across
+# version bumps, matching lua-language-server's own fixed path above.
+RUN mkdir -p /home/${USERNAME}/.local/lib/zig \
+    && curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz \
+    && echo "${ZIG_SHA256}  /tmp/zig.tar.xz" | sha256sum -c - \
+    && tar -C /home/${USERNAME}/.local/lib/zig --strip-components=1 -xJf /tmp/zig.tar.xz \
+    && rm /tmp/zig.tar.xz
+ENV PATH="/home/${USERNAME}/.local/lib/zig:${PATH}"
+
+# zls is a single self-contained binary (confirmed live via `tar -t` --
+# flat archive, no nested dir, unlike zig's own tarball above), same
+# install pattern as ruff/stylua -- no bundled runtime data to keep it
+# beside, unlike zig itself. ZLS_VERSION is tracked as its own ARG
+# rather than reused from ZIG_VERSION, even though both are 0.16.0 right
+# now -- zls and zig are independently tagged releases that only happen
+# to match today, and lsp-mode/zls both require the LSP server version to
+# match the toolchain version exactly, so a future zig bump must not
+# silently drag zls along for free.
+RUN mkdir -p /tmp/zls-extract \
+    && curl -fsSL "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-x86_64-linux.tar.xz" -o /tmp/zls.tar.xz \
+    && echo "${ZLS_SHA256}  /tmp/zls.tar.xz" | sha256sum -c - \
+    && tar -C /tmp/zls-extract -xJf /tmp/zls.tar.xz \
+    && install -m 755 /tmp/zls-extract/zls /home/${USERNAME}/.local/bin/zls \
+    && rm -rf /tmp/zls.tar.xz /tmp/zls-extract
+
 ENV PATH="/home/${USERNAME}/.nix-profile/bin:${PATH}"
 
 COPY --chown=${USERNAME}:${USERNAME} config.el          /home/${USERNAME}/.config/doom/config.el
@@ -685,7 +722,6 @@ COPY --chown=${USERNAME}:${USERNAME} shell-config.el        /home/${USERNAME}/.c
 COPY --chown=${USERNAME}:${USERNAME} sh-keybindings.el     /home/${USERNAME}/.config/doom/sh-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} c-keybindings.el      /home/${USERNAME}/.config/doom/c-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} rust-keybindings.el   /home/${USERNAME}/.config/doom/rust-keybindings.el
-COPY --chown=${USERNAME}:${USERNAME} zig-keybindings.el    /home/${USERNAME}/.config/doom/zig-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} cmake-keybindings.el  /home/${USERNAME}/.config/doom/cmake-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} docker-keybindings.el /home/${USERNAME}/.config/doom/docker-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} lua-keybindings.el    /home/${USERNAME}/.config/doom/lua-keybindings.el

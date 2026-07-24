@@ -2,7 +2,7 @@
 
 # IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Guile + Racket +
 # Rash + Bats + Nushell + C/C++/CMake + Lua + Python/Ruby/JavaScript/
-# TypeScript glue-script tier + Fish + Assembly + Perl syntax-only).
+# TypeScript glue-script tier + Fish + Assembly + Zig + Perl syntax-only).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -17,8 +17,9 @@
 # nu, guile, racket, racket-langserver, rash, raco fmt, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
 # lua-language-server, stylua, python3, pyright, ruff, ruby, ruby-lsp,
 # rubocop, typescript-language-server, prettier, oxlint, cargo, rustc,
-# rust-analyzer, rustfmt, clippy, lldb, fish, fish-lsp, asm-lsp are all baked
-# into the image at build time (no network/host bind mounts required). nu and
+# rust-analyzer, rustfmt, clippy, lldb, fish, fish-lsp, asm-lsp, zig, zls are
+# all baked into the image at build time (no network/host bind mounts
+# required). nu and
 # clangd both double as their own LSP server, no separate language-server
 # package needed for either. ccls is deliberately not installed (see
 # Dockerfile) -- Doom's own :lang cc module already deprioritizes it below
@@ -118,6 +119,22 @@ echo "hi"
 EOF
   cat > /tmp/smoketest/test.pl <<'EOF'
 print "hi\n";
+EOF
+  cat > /tmp/smoketest/test.zig <<'EOF'
+const std = @import("std");
+
+pub fn main() void {
+    std.debug.print("hi\n", .{});
+}
+EOF
+  cat > /tmp/smoketest/test-fmt.zig <<'EOF'
+const std = @import("std");
+
+pub fn main() void {
+    std.debug.print(
+        "hi\n"
+    );
+}
 EOF
   # In its own subdirectory, not /tmp/smoketest/ directly -- confirmed
   # live that go-mode.el registers a magic-mode-alist predicate
@@ -366,6 +383,15 @@ eval_elisp() {
   run asm-lsp version
   [ "$status" -eq 0 ]
   [[ "$output" =~ "0.10.1" ]]
+}
+
+@test "zig and zls are installed and report the pinned version (0.16.0)" {
+  run zig version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.16.0" ]]
+  run zls --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.16.0" ]]
 }
 
 @test "opening a .bash file activates sh-mode with the bash dialect" {
@@ -940,6 +966,54 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.pl") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "perl-mode" ]]
+}
+
+@test "opening a .zig file activates zig-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.zig") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "zig-mode" ]]
+}
+
+@test "lsp-mode loads and zls connects for zig-mode buffers ((zig +lsp))" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.zig")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "zls" ]]
+}
+
+# zig-fmt is apheleia's own built-in default formatter for zig-mode
+# (confirmed directly in apheleia-formatters.el at this project's pinned
+# commit), and Doom's zig module explicitly sets zig-format-on-save nil to
+# defer to it -- same "require apheleia up front, callback-based wait,
+# count-lines instead of a prin1-escaped string match" approach as the
+# Racket format-on-save test above, same reasoning throughout.
+@test "zig format-on-save formatter (zig-fmt) actually reformats" {
+  run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test-fmt.zig")
+    (require (quote apheleia))
+    (let ((done nil))
+      (apheleia-format-buffer
+       (alist-get major-mode apheleia-mode-alist)
+       (lambda (&rest _) (setq done t)))
+      (let ((deadline (+ (float-time) 30)))
+        (while (and (not done) (< (float-time) deadline))
+          (sleep-for 0.2)))
+      (count-lines (point-min) (point-max))))'
+  [ "$status" -eq 0 ]
+  # test-fmt.zig's deliberately-split call is 6 lines; zig fmt collapses
+  # the argument-less multi-line call onto one line (5 total), confirmed
+  # live -- zig fmt only preserves a multi-line call shape when a trailing
+  # comma is present, which this fixture deliberately omits.
+  [[ "$output" == "5" ]]
+}
+
+@test "dape's built-in lldb-dap debug config covers zig-mode (:tools debugger)" {
+  run eval_elisp '(progn (require (quote dape)) (memq (quote zig-mode) (plist-get (alist-get (quote lldb-dap) dape-configs) (quote modes))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "zig-mode" ]]
 }
 
 @test "Doom loaded without error (nonzero package/module count)" {

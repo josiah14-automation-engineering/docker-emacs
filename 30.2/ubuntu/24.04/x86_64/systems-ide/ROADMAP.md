@@ -211,9 +211,54 @@ into std, and flycheck errors. Run `rustc --version` inside the container.
 
 ---
 
-## Step 8: Zig — [#7](https://github.com/josiah14-automation-engineering/docker-emacs/issues/7)
+## ~~Step 8: Zig~~ ✓ COMPLETE (aarch64-verified, x86_64 build-untested) — [#7](https://github.com/josiah14-automation-engineering/docker-emacs/issues/7)
 
-**Currently just a stub, not started**: `zig-keybindings.el` exists but is an
+**Implemented and verified live end-to-end** (2026-07-24): `zig-mode`
+activates, `zls` connects and correctly serves hover, goto-definition
+(cross-file, `main.zig` → `counter.zig`), find-references, and rename
+(all 4 occurrences across both files) — full details plus one corrected
+finding in `flight-tests/zig/zig-flight-test.md`. Diagnostics work for
+both syntax and semantic errors, but not via the mechanism this section
+originally assumed: `flycheck-get-checker-for-buffer` reports `lsp`, not
+Doom's manually-registered `zig` (`ast-check`) checker — the same
+checker-priority-contest shape already seen with ruby-lsp-ls/rubocop-ls,
+just never previously hit for a syntax-only checker vs. an LSP one. zls's
+diagnostics cover semantics fully (confirmed with both a missing-semicolon
+syntax error and an unused-local semantic error), so the `ast-check`-only
+limitation flagged below turned out not to matter in practice.
+
+The debugger cycle (the two gaps flagged below) is fully verified live:
+`+dape-zig-program` correctly falls back to the buffer's own basename
+before any build exists, then correctly resolves
+`zig-out/bin/flight-test` after a real `zig build`; `+dape-resolve-cwd`
+resolves the `build.zig` root throughout. A real breakpoint/continue/
+step/inspect/completion cycle through `lldb-dap` confirmed `n: 0` → `n:
+1` at the right lines, and the program printed its full expected output
+and exited 0. `zig-run`/`zig-test-buffer` both turned out to run directly
+against the buffer's file (`zig run`/`zig test <file>`), not through
+`build.zig` at all — correcting this section's `zig build run` guess
+below. `zig fmt` format-on-save (apheleia's own built-in default) also
+confirmed live. One binding (`SPC c a`, code actions) is not independently
+verified — a raw, incorrectly-formed `codeAction` LSP request hung zls
+and froze the single-threaded Emacs session entirely (recovered by
+relaunching the container, not by any in-session recovery — see the
+flight-test doc). Full smoketest: 100/100 on aarch64. x86_64 tree got the
+identical source changes mirrored over but was not rebuilt/tested this
+session, same status as Racket's/Guile's own x86_64 gap.
+
+Also added this session, following the exact same DRY/decoupling
+discipline the elisp style guide calls for: `+dape--first-executable`, a
+new private helper in `dape-config.el` shared by `+dape-cmake-program`
+and the new `+dape-zig-program` (previously duplicated inline), and the
+new zig-mode `modes` fix for lldb-dap/lldb-vscode is its own dedicated
+`dolist`, matching this file's established one-loop-per-concern shape
+(same as the `:disableASLR`/`:stopOnEntry` loops) rather than being
+folded into the existing gdb/lldb-dap/lldb-vscode `:program` loop.
+
+<details>
+<summary>Original planning notes (superseded by the above, kept for context)</summary>
+
+**Originally just a stub, not started**: `zig-keybindings.el` exists but is an
 empty placeholder never actually loaded from `config.el`, and there's no
 `zig` in `init.el`'s `:lang` block or any Zig toolchain install in the
 Dockerfile at all (confirmed directly against all three files in both
@@ -313,6 +358,8 @@ purpose" rule); confirm `zig-mode` activates, zls connects
 and a real breakpoint/continue/inspect cycle works through
 `lldb-dap` once the two debugger gaps above are fixed. Run `zig version`
 and `zls --version` inside the container.
+
+</details>
 
 ---
 

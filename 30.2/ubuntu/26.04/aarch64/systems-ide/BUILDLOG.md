@@ -2941,3 +2941,120 @@ over, per this project's established pattern, but was **not** rebuilt or
 tested this session -- deliberately deferred to the batch x86_64 pass
 already planned (see DECISIONLOG.md/ROADMAP.md), same status as Guile's
 own x86_64 gap from two days prior.
+
+### 2026-07-24 — Zig added as eleventh full-support language; Haskell added syntax-only
+
+`(zig +lsp)` added to `:lang` (after `yaml`, alphabetically last); `haskell`
+added bare, no flags (between `go` and `javascript`). Both verified live via
+a full GUI `run.sh` session, not just bats -- Zig in particular exercised
+brand-new debugger-resolver code end to end.
+
+**Zig install:** whole-directory extract + `PATH` prepend for `zig` itself
+(bundles its own `lib/` beside the binary, confirmed live via `tar -t` --
+not a single relocatable binary the way `ruff`/`stylua` are), `--strip-
+components=1` so the install path (`~/.local/lib/zig`) stays fixed across
+version bumps. `zls` by contrast *is* a flat single-binary tarball (no
+nested dir), same `curl | sha256sum -c | tar | install` pattern as ruff/
+stylua. Zig 0.16.0 / zls 0.16.0, both re-verified live same-day (checksums
+unchanged from the previous session's capture). `zig fmt` is already
+apheleia's own built-in default formatter for zig-mode/zig-ts-mode
+(confirmed directly in `apheleia-formatters.el` at this project's pinned
+commit) and Doom's zig module already sets `zig-format-on-save nil` to
+defer to it -- no override needed. The stale, never-loaded
+`zig-keybindings.el` stub (present since before this project tracked Zig
+at all) was deleted rather than filled in, same as Racket -- Doom's own
+`+zig-common-config` already wires a full localleader map (`b` compile,
+`f` format, `r` run, `t` test) with zero gaps.
+
+**Two real `dape-config.el` gaps fixed, found by reading the file
+directly:** lldb-dap/lldb-vscode's `modes` list had no `zig-mode` entry
+(same class of gap already fixed for `asm-mode` on `gdb`); `+dape-resolve-
+cwd`'s marker walk had no `build.zig`, which would have hit the same "//"
+fallback bug already documented for Assembly. A new `+dape-zig-program`
+resolver was added, verified live (not assumed) against both real cases
+Zig actually produces: `zig build` places output at `zig-out/bin/<name>`
+(confirmed: `zig init`'s own scaffold, a real `zig build`, `find zig-out`);
+a lone-file `zig build-exe foo.zig` produces `./foo` (source basename, no
+extension) with no `zig-out/` involved at all -- `+dape-zig-program`'s
+fallback branch is gated on `zig-mode` specifically (unlike the cargo/
+cmake resolvers' bare marker-gated fallbacks) since it's the only one of
+the three with a non-nil result for *any* file, not just a zig one.
+
+**A DRY/decoupling correction mid-session, prompted directly ("follow
+convention, keep it DRY, keep it decoupled"):** the "find the single
+executable file in a directory" scan was about to become a third
+verbatim copy (already duplicated once between `+dape-cargo-program`-
+adjacent `+dape-cmake-program` and the new `+dape-zig-program`) -- pulled
+into a new private `+dape--first-executable` helper instead, used by
+both. Separately, the new zig-mode `modes` fix was initially folded into
+the existing top `dolist` (the one that also sets `:program` and appends
+`asm-mode` for gdb) -- but this file's own established convention is one
+dedicated `dolist` per independent lldb-dap/lldb-vscode-only concern (see
+the separate `:disableASLR`/`:stopOnEntry` loops later in the same file),
+so it was pulled out into its own loop to match. See
+`ELISP-STYLE-GUIDE.md` §3.3/§9 and DECISIONLOG.md for the reasoning.
+
+**Zig's flycheck checker turned out to be `lsp`, not Doom's own manually-
+registered `zig` (`ast-check`)** -- confirmed live via
+`flycheck-get-checker-for-buffer`, same checker-priority-contest shape
+already seen with ruby-lsp-ls/rubocop-ls. This means `SPC b c` gets zls's
+own full semantic diagnostics, not just `ast-check`'s syntax-only
+coverage -- confirmed live with both a missing-semicolon syntax error and
+an unused-local semantic error, both correctly surfaced. See
+DECISIONLOG.md's new entry; no code change resulted, just a corrected
+assumption in the flight-test doc and fixture comments.
+
+**Full live GUI debugger verification, exercising the two new resolvers
+end to end:** `+dape-zig-program` correctly returned the buffer-basename
+fallback before any build existed, then correctly resolved
+`~/flight-tests/zig/zig-out/bin/flight-test` after a real `zig build`
+(invoked via `SPC m b`/`zig-compile`); `+dape-resolve-cwd` resolved the
+`build.zig` root throughout. `:stopOnEntry` (this file's existing lldb-dap
+workaround, shared across languages) stopped first inside Zig's own
+std-library startup code (`Target.Cpu.Arch.isRiscv32`, not literally
+`main`'s first line -- Zig's runtime entry differs from Rust's, same
+underlying mechanism); continuing reached the real breakpoint at
+`main.zig:20`. Inspecting the `Counter` local's `variablesReference`
+showed `n: "0"`; stepping over advanced to line 21 with `n: "1"`;
+continuing to completion printed the full expected program output and
+exited status 0. `zig-run`/`zig-test-buffer` (Doom's own module bindings)
+both turned out to invoke `zig run`/`zig test` directly against the
+buffer's file, not through `build.zig` at all -- corrected in the
+flight-test doc, which had assumed `zig build run`.
+
+**One binding not independently verified this session, and a real
+container-killing incident along the way:** `SPC c a` (code actions) --
+a raw `textDocument/codeAction` LSP request issued without a `:context`
+key (the references/rename requests both needed one; code actions
+apparently do too) hung zls indefinitely. Since `lsp-request` (the
+synchronous variant) blocks the entire single-threaded Emacs process
+waiting for a response, this froze the *whole* GUI session -- even a
+bare `(+ 1 1)` eval timed out afterward. Recovery attempted via `kill
+-INT 1` inside the container, on the (wrong) assumption that Emacs traps
+SIGINT as a quit signal the same way it does for an interactive C-g --
+it does not, for a headless daemon with no controlling terminal/
+minibuffer context to quit from; the signal killed the entire process
+instead, and since it was PID 1 in a `--rm` container, the container was
+torn down completely. Recovered by simply relaunching `./run.sh -f zig`
+-- no state was lost since all fixture files are bind-mounted from the
+host and had already been cleanly reverted before the hang. Recorded in
+`flight-tests/zig/zig-flight-test.md` so a future session doesn't repeat
+either the malformed request or the SIGINT assumption.
+
+**Haskell added syntax-only, exactly per DECISIONLOG's prior scope
+decision:** a bare `(haskell)` line, no `+lsp`/`+tree-sitter` flags --
+confirmed directly against Doom's own `lang/haskell/packages.el` that
+`haskell-ts-mode` and `lsp-haskell` are both flag-gated and never even
+get installed without them, leaving only plain `haskell-mode`. Zero
+config.el/packages.el changes needed, same "check before assuming work
+is required" pattern as Racket/Zig. Smoketest fixture is an XMonad-
+config-shaped snippet rather than the usual generic "hi" print, since
+XMonad configs are this feature's actual motivating use case (Turtle
+scripts are the other, weighted slightly less -- see DECISIONLOG.md).
+
+Full smoketest on aarch64 after all of the above: 100/100. x86_64 tree
+got the identical Dockerfile/init.el/dape-config.el/smoketest.bats/
+flight-tests source changes mirrored over, but was **not** rebuilt or
+tested this session -- deliberately deferred to the batch x86_64 pass
+already planned, same status as every other language's x86_64 gap this
+project has accumulated so far.
