@@ -17,3 +17,14 @@
 
 (add-hook! metal-mercury-mode
   (flycheck-mode +1))
+
+;; The Doom Emacs default is to assume .m files are objective-c. However, in the case
+;; for this IDE, we want to assume they're Mercury code since this IDE is provisioned
+;; for work in the logic-paradigm family of programming languages. The first line
+;; corrects the display icon for dired, treemacs, and tabs (the extension-based rendering),
+;; the second line fixes doom-modeline's buffer icon which is mode-based.
+(after! nerd-icons
+  (setf (alist-get "m" nerd-icons-extension-icon-alist nil nil #'equal)
+        (list 'nerd-icons-faicon "nf-fa-mercury" :face 'nerd-icons-orange))
+  (add-to-list 'nerd-icons-mode-icon-alist
+               '(metal-mercury-mode nerd-icons-faicon "nf-fa-mercury" :face nerd-icons-orange)))
