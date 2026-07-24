@@ -696,6 +696,72 @@ that decision being revisited first.
 
 ---
 
+## Step 11.8: Chez / Gambit / Gerbil (Systems-Programming Schemes)
+
+Continues the Lisp-family, REPL-first track started with Guile and Racket
+(Step 11 / Step 11.5) — these three are the "systems-programming" Schemes
+raised as the ask that follows Zig, distinct from Guile (GNU/Guix's own
+implementation language) and Racket, both already done.
+
+No GitHub issue yet. Research was started but interrupted before any
+Dockerfile/init.el work began — nothing for these three is implemented.
+The notes below are what's confirmed so far; several real go/no-go
+decisions are flagged and should be settled before writing any Dockerfile
+lines, same standard as Rash's own flagged tradeoff under Step 11.5.
+
+**Doom module support (confirmed against `lang/scheme/config.el` at the
+pinned commit):**
+- `+chez` and `+gambit` flags both exist on `:lang scheme` alongside the
+  `+guile` flag already in use — verify exactly what each wires (REPL
+  handler, flycheck, localleader) before assuming parity with Guile's
+  own zero-extra-elisp outcome.
+- Gerbil is **not** one of `scheme`'s flags — it's its own dialect/
+  toolchain layered on top of Gambit, not a Geiser backend. It likely
+  needs a project-authored `gerbil-config.el`/`gerbil-keybindings.el`
+  from scratch, the same shape Nushell/TOML/Fish/Assembly needed,
+  unlike Guile/Racket. Confirm live rather than assuming this.
+
+**Packaging — real gaps found, not yet resolved:**
+- **Chez**: apt's `chezscheme` is stale — 10.0.0 on 26.04 (resolute),
+  9.5.8 on 24.04 (noble), vs upstream 10.4.1. Same "apt lags upstream"
+  pattern already hit with Racket/TypeScript/rbs/cmake-language-server
+  elsewhere in this file. Racket's own fix (official installer, fresh
+  SHA256 captured at implementation time, over apt) is the likely
+  template — but Chez Scheme's own release process (source build vs. a
+  bootstrap-file-based release) hasn't been checked yet. **Go/no-go
+  needed:** accept the stale apt version, or take on a source build.
+- **Gambit**: apt's package name is `gambc`, not `gambit` (confirmed),
+  currently 4.9.3 — still needs a check against Gambit's actual current
+  upstream release before treating apt as good enough here (unlike
+  Chez, this one hasn't been confirmed stale, only that the package
+  name differs from what you'd guess).
+- **Gerbil**: no apt package, and its GitHub Releases carry no binary
+  assets — real binaries appear to live via the `gerbil/gerbil` Docker
+  Hub image (has `amd64`/`arm64` tags) or a `git.cons.io` mirror,
+  neither confirmed in depth yet. Since Gerbil builds on top of Gambit,
+  a source build against this image's own `gambc` install may be
+  simplest — untested assumption. **Go/no-go needed:** multi-stage
+  `COPY --from=` a Docker image (mirrors Guile's own `guix-source`
+  pattern under Step 11) vs. building from source in-Dockerfile.
+
+**Before starting:** settle both go/no-go questions above explicitly
+rather than picking silently, same standard as Rash. Then follow the
+established per-language cycle (Dockerfile → `init.el` flags/new elisp
+if Gerbil needs it → bats smoketest → GUI functional verification, not
+just bats → ROADMAP/BUILDLOG/DECISIONLOG updates) — and check whether a
+debugger applies at all here first: every Lisp-family language done so
+far (Guile, Racket) uses its own REPL (Geiser / racket-mode) rather than
+`dape`, so `dape-config.el` changes are likely out of scope unless
+something about Chez/Gambit/Gerbil specifically needs them.
+
+**Verify:** `chez --version` / `gsi --version` / whatever Gerbil's own
+version-check invocation turns out to be, all inside the container.
+Open one file per dialect and confirm the right major mode + REPL
+handler activate. Same aarch64-first, x86_64-mirror-only convention as
+every other step this batch.
+
+---
+
 ## Step 12: TOML — [#12](https://github.com/josiah14-automation-engineering/docker-emacs/issues/12)
 
 No Doom module exists for TOML. Requires manual mode + LSP wiring.
@@ -787,6 +853,292 @@ built into Emacs core by default (confirmed live via `emacs -Q
 Assembly split out into its own completed step above rather than
 staying folded into this batch, once it turned out to warrant full LSP
 too.
+
+---
+
+## Step 15: Nim
+
+Not yet researched in depth — this is a backlog placeholder, not a
+verified plan; confirm everything below live before writing any
+Dockerfile lines, same standard as every other step in this file.
+
+No Doom `:lang nim` module is believed to exist (unconfirmed) — likely
+needs the same project-authored `packages.el`/`nim-config.el` treatment
+as TOML (Step 12), not a Doom module flag. `nim-mode` (MELPA) is the
+likely major mode. `nimlangserver` (nim-lang/langserver) is the actively
+maintained LSP option, installed via `nimble` (Nim's own package
+manager) once the compiler itself is on `PATH` — installed either via
+apt (check staleness first, same as everywhere else in this file) or
+`choosenim` (Nim's official version manager, closer to rustup's role
+for Rust). Debugger: Nim compiles to C then to a native binary, so a
+dape `:program` resolver analogous to `+dape-zig-program` (Step 8) may
+let this reuse gdb/lldb-dap rather than needing new debugger wiring —
+check where `nim c` places its output by default (same-directory,
+source-basename, unless a nimble project structure is in play).
+
+**Verify:** Open a `.nim` file; confirm the major mode and (if wired)
+`nimlangserver` activate. Run `nim --version` inside the container.
+
+---
+
+## Step 16: Odin
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+No Doom module, and no MELPA major mode confirmed yet either — check
+for one before assuming a project-authored mode is needed from scratch
+(unlike every other step in this file so far, which at minimum found an
+existing major-mode package to lean on). OLS (DanielGavin/ols, "Odin
+Language Server") is the LSP option — check whether it ships prebuilt
+release binaries or needs a source build (Odin's own toolchain is
+required to build OLS, since OLS is itself written in Odin). Debugger:
+Odin compiles to native code via LLVM; likely another dape `:program`-
+resolver candidate reusing gdb/lldb-dap, same reasoning as Nim above —
+check `odin build`'s default output location/naming first.
+
+**Verify:** Open a `.odin` file; confirm major mode + OLS. Run
+`odin version` inside the container.
+
+---
+
+## Step 17: SBCL (Common Lisp)
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+Doom is believed to have a `:lang common-lisp` module (SLY as the
+REPL backend, mirroring Racket/Guile's own REPL-first shape) — this
+needs the same due-diligence check already done for Guile/Racket
+(Step 11 / Step 11.5) before assuming it's fully built out with zero
+extra elisp: confirm against `lang/common-lisp/config.el` at this
+project's pinned Doom commit rather than assuming parity. SBCL itself
+is likely fine via apt (it's GCC-adjacent in how actively Debian/Ubuntu
+track it, unlike the standalone-binary-release tools elsewhere in this
+file) — check staleness anyway, same standard as everywhere else.
+Completes the two-branch Lisp family this project has otherwise built
+entirely out of Scheme (Guile, Racket, and Step 11.8's Chez/Gambit/
+Gerbil) — Common Lisp is the other major historical branch, with its
+own systems-programming pedigree (Lisp Machines).
+
+**Verify:** Open a `.lisp` file; confirm `sly` connects to a running
+SBCL REPL. Run `sbcl --version` inside the container.
+
+---
+
+## Step 18: Fortran
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+No Doom module expected. Emacs ships `f90-mode` built-in for free-form
+modern Fortran (and `fortran-mode` for fixed-form/legacy source) --
+check whether Doom's default Emacs build already auto-associates
+`.f90`/`.f95`, or whether this needs an explicit `auto-mode-alist`
+entry. LSP: `fortls` (fortran-language-server), installable via pip
+(this image already has Python from Step 7's Python/Ruby/JS/TS tier).
+Compiler: `gfortran` — part of GCC itself, already partially present
+in this image via the C/C++ tier (Step 5/6), so apt staleness is less
+of a concern than the standalone-binary-release tools elsewhere in
+this file (it tracks whatever GCC version Ubuntu ships, already an
+accepted tradeoff for gcc/g++). Debugger: gfortran output is
+gdb-debuggable like any other GCC output — likely reuses dape's
+existing gdb config directly, same as C/C++, probably needing zero new
+`dape-config.el` work.
+
+**Verify:** Open a `.f90` file; confirm major mode + `fortls`
+completions. Run `gfortran --version` inside the container.
+
+---
+
+## Step 19: Ada
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+No Doom module expected. `ada-mode` (GNU project, MELPA) is the likely
+major mode. LSP: Ada Language Server (`als`), bundled with GNAT
+Community or installable via Alire (`alr`, Ada's official
+toolchain/package manager — the modern equivalent of rustup for Rust,
+worth checking as the primary install path before falling back to raw
+apt `gnat`). Debugger: GNAT output is gdb-debuggable, likely another
+direct reuse of dape's existing gdb config, same as Fortran above.
+
+**Verify:** Open a `.adb`/`.ads` file; confirm major mode + `als`
+completions. Run `gnat --version` (or `alr --version`) inside the
+container.
+
+---
+
+## Step 20: D (syntax-only)
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+**Deliberately syntax-only -- an opinion signal, not a technical
+limitation** (same mechanism as Perl, Step 14: "I hate Perl, code in it
+is usually a mess, I want to discourage Perl use"). Josiah: dislikes
+the Java/C++-style class-based OOP model D inherits, preferring
+Smalltalk/Pharo-style object systems -- syntax-only tier here means
+"usable if you must, not endorsed." Correction for the record: D
+itself is modern and actively maintained (D Language Foundation,
+DMD/LDC/GDC still shipping releases), not legacy/historical the way
+Pascal (Step 21, below) genuinely is -- the tier placement is a
+language-design opinion, not a judgment about D's maintenance state.
+`d-mode` (Emacs D Mode, MELPA) is the existing major-mode package to
+use, same shape as bare `(haskell)` in `init.el` -- likely needs the
+same project-authored `packages.el` addition and nothing else, but
+confirm no Doom module exists first.
+
+**Verify:** Open a `.d` file; confirm `d-mode` activates and font-lock
+engages.
+
+---
+
+## Step 21: Pascal (syntax-only)
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+**Deliberately syntax-only -- same opinion-signal reasoning as D
+(Step 20) and Perl (Step 14)**, and here the "poor language choice"
+read is the stronger of the two: Pascal is both genuinely legacy (Niklaus
+Wirth, 1970) and its later Object Pascal/Delphi dialects carry the same
+Java/C++-style class-based OOP model Josiah dislikes. `pascal-mode`
+ships built into Emacs itself (unconfirmed this session -- verify
+before assuming zero package work), which would make this the cheapest
+addition in the whole file: no `packages.el` entry, no Dockerfile
+change, no LSP, matching Perl's own zero-Dockerfile-change shape.
+
+**Verify:** Open a `.pas` file; confirm `pascal-mode` activates and
+font-lock engages.
+
+---
+
+## Step 22: EDN
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+Not a Clojure dependency here -- Josiah uses EDN standalone as the
+storylet/anchor data format for the PPN95 project (a Mercury codebase,
+no Clojure toolchain involved). Syntax-only, but for a different reason
+than Perl/D/Pascal's opinion-signal tier (Step 14/20/21): there's no
+meaningful LSP ecosystem for standalone EDN files (existing Clojure LSP
+servers, e.g. `clojure-lsp`, are Clojure-project-aware, not built for
+bare data files) -- this is a real tooling gap, not a design objection
+to the format. Check whether a small dedicated `edn-mode` package
+already exists on MELPA before falling back to associating `.edn` with
+`clojure-mode` purely for font-locking (EDN is a syntactic subset of
+Clojure's reader syntax -- maps, vectors, keywords, sets, tagged
+literals -- so this would work, but pulls in more Clojure-specific
+tooling than actually needed for a bare-data use case).
+
+**Verify:** Open a `.edn` file; confirm the major mode highlights
+maps/vectors/keywords/tagged literals correctly.
+
+---
+
+## Step 23: Protobuf
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+The strongest candidate of this batch -- Protobuf (`.proto`) is a real
+interface-definition language, not just a data format, and directly
+relevant given this image already treats Docker/gRPC-adjacent systems
+work as in-scope. `protobuf-mode` (MELPA) is the likely major mode. LSP
+options need a real live comparison before picking one -- candidates
+include `protols` (coder3101/protols) and tooling bundled with `buf`
+(bufbuild/buf), neither confirmed this session. No debugger tier
+expected -- a schema/config language, not an executable one, same shape
+as TOML (Step 12).
+
+**Verify:** Open a `.proto` file; confirm major mode + whichever LSP is
+chosen provide real completions/diagnostics.
+
+---
+
+## Step 24: HCL
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+Terraform's configuration language -- real infra-as-code relevance.
+`hcl-mode` (MELPA) is the likely major mode. `terraform-ls`
+(HashiCorp's own official language server) is the clear LSP choice,
+mature and actively maintained. No debugger tier expected, same
+reasoning as Protobuf/TOML above.
+
+**Verify:** Open a `.tf` file; confirm major mode + `terraform-ls`
+completions.
+
+---
+
+## Step 25: Jsonnet
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+Part of the "programmable config" cluster (Jsonnet/CUE/Dhall below) --
+a real language (functions, imports, local variables) layered over
+JSON, most relevant for Kubernetes/cloud-infra config generation.
+`jsonnet-mode` (MELPA) is the likely major mode. `jsonnet-language-server`
+(grafana/jsonnet-language-server) is the LSP option. No debugger tier
+expected.
+
+**Verify:** Open a `.jsonnet` file; confirm major mode + LSP
+completions.
+
+---
+
+## Step 26: CUE
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+Same cluster as Jsonnet/Dhall -- a newer, increasingly popular
+config/schema language (Kubernetes/API-schema use cases). Emacs
+major-mode maturity is unconfirmed -- check before assuming a clean
+MELPA package exists. The CUE CLI itself reportedly ships its own `cue
+lsp` subcommand (unconfirmed this session) -- if true, this would be
+the simplest LSP path of the whole batch, no separate LSP binary to
+install/pin beyond the `cue` CLI already needed for the language
+itself.
+
+**Verify:** Open a `.cue` file; confirm major mode + `cue lsp` (or
+whatever LSP is actually available) completions.
+
+---
+
+## Step 27: Dhall
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+Same cluster as Jsonnet/CUE, but more academically-flavored (a real
+typed lambda calculus underneath) -- niche relative to the other two
+but still a genuine language, not just data. `dhall-mode` (MELPA) is
+the likely major mode. `dhall-lsp-server` (dhall-lang's own package) is
+the LSP option. No debugger tier expected.
+
+**Verify:** Open a `.dhall` file; confirm major mode + `dhall-lsp-server`
+completions.
+
+---
+
+## Step 28: XML
+
+Not yet researched in depth — backlog placeholder, confirm live before
+implementing.
+
+The weakest organic driver of this batch -- add only once something
+concrete actually needs it (a `pom.xml`, an Ant build, etc.), not
+speculatively. `nxml-mode` ships built into Emacs itself (zero package
+cost). `lemminx` (Eclipse) is a mature, real LSP option.
+
+**Verify:** Open a `.xml` file; confirm `nxml-mode` + `lemminx`
+completions/validation.
 
 ---
 
