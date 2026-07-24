@@ -53,6 +53,8 @@ ARG ZIG_VERSION=0.16.0
 ARG ZIG_SHA256=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
 ARG ZLS_VERSION=0.16.0
 ARG ZLS_SHA256=ded6d562a0b86ee878b1ddf70ffab2797ce3cdca3b02d6077548f9d56dff96b6
+ARG TAPLO_VERSION=0.10.0
+ARG TAPLO_SHA256=8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
 ARG ASM_LSP_VERSION=0.10.1
 ARG ASM_LSP_SHA256=2a2f386c10348e365df484d5c66d084813e7dbf8ab4e9eb7a7cc0bb0acf2f8f8
 ARG DEBIAN_FRONTEND=noninteractive
@@ -611,6 +613,19 @@ RUN curl -fsSL "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSI
 # ruff-pyproject.toml's own header comment for the exact mechanism.
 COPY --chown=${USERNAME}:${USERNAME} ruff-pyproject.toml /home/${USERNAME}/.config/ruff/pyproject.toml
 
+# taplo is a single self-contained binary (Rust), same pattern as
+# stylua/ruff above -- distributed gzip-compressed (not tar), so the
+# extraction step is a plain `gunzip` rather than `tar`/`unzip`. No
+# Doom `:lang' module exists for TOML, so both the major mode
+# (toml-mode, via packages.el) and the LSP client registration
+# (toml-config.el) are project-authored, unlike every `+lsp'-flagged
+# language in init.el.
+RUN curl -fsSL "https://github.com/tamasfe/taplo/releases/download/${TAPLO_VERSION}/taplo-linux-x86_64.gz" -o /tmp/taplo.gz \
+    && echo "${TAPLO_SHA256}  /tmp/taplo.gz" | sha256sum -c - \
+    && gunzip -c /tmp/taplo.gz > /home/${USERNAME}/.local/bin/taplo \
+    && chmod +x /home/${USERNAME}/.local/bin/taplo \
+    && rm /tmp/taplo.gz
+
 # asm-lsp (bergercookie/asm-lsp) -- a single self-contained binary (Rust)
 # here, same prebuilt-release pattern as ruff/stylua above: unlike the
 # aarch64/M2 tree (whose Linux target has no prebuilt release at all, so
@@ -740,6 +755,7 @@ COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} fish-keybindings.el   /home/${USERNAME}/.config/doom/fish-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} fish-config.el        /home/${USERNAME}/.config/doom/fish-config.el
 COPY --chown=${USERNAME}:${USERNAME} asm-config.el         /home/${USERNAME}/.config/doom/asm-config.el
+COPY --chown=${USERNAME}:${USERNAME} toml-config.el        /home/${USERNAME}/.config/doom/toml-config.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
 COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el

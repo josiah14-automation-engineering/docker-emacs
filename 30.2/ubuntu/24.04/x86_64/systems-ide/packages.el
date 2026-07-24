@@ -5,4 +5,5 @@
 (package! flycheck-golangci-lint) ;; inline golangci-lint diagnostics in go-mode
 (package! bats-mode)            ;; major mode for editing/running .bats test files
 (package! fish-mode)            ;; major mode for .fish scripts (wwwjfy/emacs-fish)
+(package! toml-mode)            ;; major mode for .toml files (dryman/toml-mode.el)
 

@@ -2,7 +2,7 @@
 
 # IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Guile + Racket +
 # Rash + Bats + Nushell + C/C++/CMake + Lua + Python/Ruby/JavaScript/
-# TypeScript glue-script tier + Fish + Assembly + Zig + Perl/Haskell
+# TypeScript glue-script tier + Fish + Assembly + Zig + TOML + Perl/Haskell
 # syntax-only).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
@@ -18,9 +18,9 @@
 # nu, guile, racket, racket-langserver, rash, raco fmt, clang(d), gcc/g++, cmake, gdb, cmake-language-server, vcpkg, conan, lua,
 # lua-language-server, stylua, python3, pyright, ruff, ruby, ruby-lsp,
 # rubocop, typescript-language-server, prettier, oxlint, cargo, rustc,
-# rust-analyzer, rustfmt, clippy, lldb, fish, fish-lsp, asm-lsp, zig, zls are
-# all baked into the image at build time (no network/host bind mounts
-# required). nu and
+# rust-analyzer, rustfmt, clippy, lldb, fish, fish-lsp, asm-lsp, zig, zls,
+# taplo are all baked into the image at build time (no network/host bind
+# mounts required). nu and
 # clangd both double as their own LSP server, no separate language-server
 # package needed for either. ccls is deliberately not installed (see
 # Dockerfile) -- Doom's own :lang cc module already deprioritizes it below
@@ -155,6 +155,11 @@ pub fn main() void {
         "hi\n"
     );
 }
+EOF
+  cat > /tmp/smoketest/test.toml <<'EOF'
+[package]
+name = "smoketest"
+version = "0.1.0"
 EOF
   # In its own subdirectory, not /tmp/smoketest/ directly -- confirmed
   # live that go-mode.el registers a magic-mode-alist predicate
@@ -412,6 +417,12 @@ eval_elisp() {
   run zls --version
   [ "$status" -eq 0 ]
   [[ "$output" =~ "0.16.0" ]]
+}
+
+@test "taplo is installed and reports the pinned version (0.10.0)" {
+  run taplo --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "0.10.0" ]]
 }
 
 @test "opening a .bash file activates sh-mode with the bash dialect" {
@@ -1046,6 +1057,23 @@ eval_elisp() {
   run eval_elisp '(progn (require (quote dape)) (memq (quote zig-mode) (plist-get (alist-get (quote lldb-dap) dape-configs) (quote modes))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "zig-mode" ]]
+}
+
+@test "opening a .toml file activates toml-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.toml") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "toml-mode" ]]
+}
+
+@test "lsp-mode loads and taplo connects for toml-mode buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.toml")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "taplo" ]]
 }
 
 @test "Doom loaded without error (nonzero package/module count)" {

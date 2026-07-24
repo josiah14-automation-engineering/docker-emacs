@@ -135,6 +135,7 @@
 (load! "ruby-config")
 (load! "fish-config")
 (load! "asm-config")
+(load! "toml-config")
 (load! "global-keybindings")
 (load! "polyglot-keybindings")
 (load! "sh-keybindings")

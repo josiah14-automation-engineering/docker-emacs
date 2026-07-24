@@ -48,6 +48,8 @@ ARG ZIG_VERSION=0.16.0
 ARG ZIG_SHA256=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17
 ARG ZLS_VERSION=0.16.0
 ARG ZLS_SHA256=430cd293d201eb70ae2519dbc96c854bf8791b8df7fc9392e8d2dc9680a2bed7
+ARG TAPLO_VERSION=0.10.0
+ARG TAPLO_SHA256=033681d01eec8376c3fd38fa3703c79316f5e14bb013d859943b60a07bccdcc3
 ARG DEBIAN_FRONTEND=noninteractive
 ARG TZ=US/Chicago
 
@@ -626,6 +628,19 @@ RUN curl -fsSL "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSI
 # ruff-pyproject.toml's own header comment for the exact mechanism.
 COPY --chown=${USERNAME}:${USERNAME} ruff-pyproject.toml /home/${USERNAME}/.config/ruff/pyproject.toml
 
+# taplo is a single self-contained binary (Rust), same pattern as
+# stylua/ruff above -- distributed gzip-compressed (not tar), so the
+# extraction step is a plain `gunzip` rather than `tar`/`unzip`. No
+# Doom `:lang' module exists for TOML, so both the major mode
+# (toml-mode, via packages.el) and the LSP client registration
+# (toml-config.el) are project-authored, unlike every `+lsp'-flagged
+# language in init.el.
+RUN curl -fsSL "https://github.com/tamasfe/taplo/releases/download/${TAPLO_VERSION}/taplo-linux-aarch64.gz" -o /tmp/taplo.gz \
+    && echo "${TAPLO_SHA256}  /tmp/taplo.gz" | sha256sum -c - \
+    && gunzip -c /tmp/taplo.gz > /home/${USERNAME}/.local/bin/taplo \
+    && chmod +x /home/${USERNAME}/.local/bin/taplo \
+    && rm /tmp/taplo.gz
+
 # Rust gets full IDE support, same presumption as Go: real projects, not
 # glue scripts. rustup (not apt) pins the toolchain to one exact version;
 # rust-analyzer/rustfmt/clippy are rustup components, landing alongside
@@ -746,6 +761,7 @@ COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} fish-keybindings.el   /home/${USERNAME}/.config/doom/fish-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} fish-config.el        /home/${USERNAME}/.config/doom/fish-config.el
 COPY --chown=${USERNAME}:${USERNAME} asm-config.el         /home/${USERNAME}/.config/doom/asm-config.el
+COPY --chown=${USERNAME}:${USERNAME} toml-config.el        /home/${USERNAME}/.config/doom/toml-config.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
 COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el
