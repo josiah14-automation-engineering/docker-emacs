@@ -2,7 +2,8 @@
 
 # IDE smoketest for systems-ide (Shell + Go + Rust + Nix + Guile + Racket +
 # Rash + Bats + Nushell + C/C++/CMake + Lua + Python/Ruby/JavaScript/
-# TypeScript glue-script tier + Fish + Assembly + Zig + Perl syntax-only).
+# TypeScript glue-script tier + Fish + Assembly + Zig + Perl/Haskell
+# syntax-only).
 #
 # Verifies the actual Doom Emacs session boots correctly and each implemented
 # language's major mode, checkers, LSP wiring, and keybindings resolve as
@@ -119,6 +120,25 @@ echo "hi"
 EOF
   cat > /tmp/smoketest/test.pl <<'EOF'
 print "hi\n";
+EOF
+  # Haskell deliberately stays syntax-only (see DECISIONLOG.md) -- an
+  # XMonad-config-shaped snippet rather than a generic "hi" print, since
+  # XMonad configs are this feature's actual motivating use case (Turtle
+  # scripts are the other one, weighted slightly less -- see DECISIONLOG.md).
+  # It won't compile (no xmonad package installed, syntax-only means no
+  # type-checking is expected either), just needs to be valid enough
+  # Haskell syntax for haskell-mode's font-lock/indentation to engage.
+  cat > /tmp/smoketest/test.hs <<'EOF'
+import XMonad
+import XMonad.Util.EZConfig (additionalKeys)
+
+main :: IO ()
+main = xmonad $ def
+  { terminal = "alacritty"
+  , modMask = mod4Mask
+  } `additionalKeys`
+  [ ((mod4Mask, xK_p), spawn "dmenu_run")
+  ]
 EOF
   cat > /tmp/smoketest/test.zig <<'EOF'
 const std = @import("std");
@@ -966,6 +986,18 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.pl") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "perl-mode" ]]
+}
+
+# Haskell deliberately stays syntax-only too (see DECISIONLOG.md -- HLS's
+# heavier, more failure-prone dependency profile isn't worth it for a
+# shared polyglot image; a bare `(haskell)' with no +lsp/+tree-sitter flags
+# installs only haskell-mode, confirmed directly against Doom's own
+# lang/haskell/packages.el). Same shape as Perl above: confirm the mode
+# activates, nothing more to wire up.
+@test "opening a .hs file activates haskell-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.hs") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "haskell-mode" ]]
 }
 
 @test "opening a .zig file activates zig-mode" {

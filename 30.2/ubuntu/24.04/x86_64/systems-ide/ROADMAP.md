@@ -645,7 +645,18 @@ container.
 
 ---
 
-## Step 11.7: Haskell — scope decision, not yet scheduled
+## ~~Step 11.7: Haskell~~ ✓ COMPLETE (aarch64-verified, x86_64 build-untested)
+
+**Implemented and verified live** (2026-07-24), exactly per the scope
+decision below: a bare `(haskell)` line in `init.el` with no `+lsp`/
+`+tree-sitter` flags — confirmed directly against Doom's own
+`lang/haskell/packages.el` that this installs only `haskell-mode` (no
+`lsp-haskell`, no `haskell-ts-mode` package even gets pulled in without
+the flags). Zero config.el/packages.el changes needed. Smoketest confirms
+`.hs` files activate `haskell-mode`; fixture is an XMonad-config-shaped
+snippet (not a generic "hi" print like most other fixtures) since XMonad
+configs are this feature's actual motivating use case, per the "Not a
+factor" note below.
 
 No GitHub issue yet. Not part of the current Racket+Rash → Zig →
 Chez/Gambit/Gerbil integration order — raised during Racket/systems-Lisp

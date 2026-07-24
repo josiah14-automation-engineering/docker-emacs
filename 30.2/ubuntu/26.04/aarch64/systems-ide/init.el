@@ -52,6 +52,7 @@
        data
        emacs-lisp
        (go +lsp)
+       haskell
        (javascript +lsp)
        json
        (lua +lsp)
