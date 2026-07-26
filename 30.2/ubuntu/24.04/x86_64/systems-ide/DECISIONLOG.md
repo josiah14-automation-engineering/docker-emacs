@@ -746,3 +746,65 @@ because a collision was ever confirmed on this tree.
 **Revisit if:** this tree's own display-forwarding mechanism ever
 changes to something that *does* share host state the way the aarch64
 tree's Wayland approach does.
+
+---
+
+## Chez and Gambit: source builds over apt (mirrored from the aarch64 tree)
+
+**Date:** 2026-07-26
+**Status:** Active
+
+**Decision:** `josiah14/chez`/`josiah14/gambit` build from official
+source archives rather than apt, mirroring the aarch64 tree's own
+`chez`/`gambit` source images — same Dockerfiles, only the base image
+tag differs (`ubuntu:24.04` here vs. `ubuntu:26.04` there).
+
+**Rationale (full detail in the aarch64 tree's own DECISIONLOG.md, not
+independently re-verified against this tree's own apt archive):** apt's
+`chezscheme`/`gambc` both lag several releases behind upstream there;
+Chez ships no Linux binary upstream at all; both source archives were
+confirmed free of any bootstrap chicken-and-egg problem (Chez's boot
+files, Gambit's pregenerated `.c` sources). Both get their own
+standalone source image mirroring `nix-source`/`guix-source`, install
+to a single `/opt/<name>` prefix, and land on `PATH` at exactly the
+executable names `geiser-chez-binary`/`geiser-gambit-binary` default to
+(`scheme`/`gsi`).
+
+**Revisit if:** this tree's own apt archive is ever checked directly
+and turns out not to lag the way the aarch64 tree's does (unverified
+assumption carried over, not confirmed live on x86_64/24.04).
+
+---
+
+## Gerbil: source build of v0.18.2 (mirrored from the aarch64 tree)
+
+**Date:** 2026-07-26
+**Status:** Active
+
+**Decision:** `josiah14/gerbil` builds Gerbil `v0.18.2` from source
+(`git clone --recurse-submodules --shallow-submodules`, `./configure
+--enable-poll && make && make install`), mirroring the aarch64 tree's
+own Gerbil source image. Only the base image tag differs
+(`ubuntu:24.04` here).
+
+**Rationale (full detail in the aarch64 tree's own DECISIONLOG.md, not
+independently re-verified on x86_64 this session):** the aarch64 tree's
+first implementation pulled prebuilt binaries from the official
+`gerbil/ubuntu` image instead, but that build turned out to be three
+years stale (2023-10-18) relative to the current `v0.18.2` tag —
+reversed once challenged on the staleness, and the source build turned
+out to need nothing exotic beyond a real `git clone
+--recurse-submodules` (Gerbil bundles its own pinned Gambit as a
+submodule since v0.18, so GitHub's tarball endpoints — fine for
+Chez/Gambit — don't carry submodule content). The apt package list
+mirrors the aarch64 tree's own (trimmed from upstream's `dist/
+packages.mk` `ubuntu_packages`, dropping the fpm-packaging-only
+`rsync`/`rubygems`/`texinfo`).
+
+**Revisit if:** this image is built and tested on x86_64 for the first
+time — confirm `gerbil -v` reports `v0.18.2` and `ldd` on the real
+`gerbil`/`gsc` binaries still shows only `libc.so.6`/`libm.so.6`, the
+same way the aarch64 tree's build was verified.
+
+---
+

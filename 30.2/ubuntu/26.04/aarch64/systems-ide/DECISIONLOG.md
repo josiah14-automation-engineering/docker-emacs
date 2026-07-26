@@ -980,3 +980,142 @@ flycheck only catch syntax errors for Zig" from scratch — it doesn't.
 see ROADMAP.md Step 8), at which point the `zig` ast-check checker would
 actually become the active one and the syntax-only limitation would
 apply for real.
+
+---
+
+## Chez and Gambit: source builds over apt, both confirmed non-bootstrapping
+
+**Date:** 2026-07-26
+**Status:** Active
+
+**Decision:** Both `chez` and `gambit` are built from their official
+source archives in dedicated `josiah14/chez`/`josiah14/gambit` images
+(`COPY --from=` into `systems-ide`, same shape as `guix-source`/
+`nix-source`), not installed via apt.
+
+**Rationale:** Confirmed live against the real ubuntu:26.04 archive:
+apt's `chezscheme` is 10.0.0 (four minor versions behind the 10.4.1
+release built here), and apt's `gambc` is 4.9.3 (four point releases
+behind the 4.9.7 tag built here). Chez ships no Linux binary at all
+upstream (only a Windows installer), so there was no "official
+installer" middle ground the way Racket had — source build was the only
+non-apt option. Both were verified free of the bootstrap
+chicken-and-egg problem before committing to this: Chez's release
+tarball ships prebuilt `boot/pb` portable-bytecode boot files
+(confirmed directly from its own `BUILDING` doc), and Gambit's source
+archive ships pregenerated `.c` files from compiling itself at release
+time (confirmed directly from its own `INSTALL.txt`) — both just need a
+plain C compiler, no existing Scheme.
+
+**A packaging decision made alongside this:** rather than build either
+inline in `systems-ide`'s own Dockerfile, both get their own standalone
+source image (`josiah14/chez:10.4.1-ubuntu-26.04`,
+`josiah14/gambit:4.9.7-ubuntu-26.04`), mirroring the existing
+`nix-source`/`guix-source` pattern rather than introducing a third
+shape. Each installs to a single self-contained `/opt/<name>` prefix
+and gets `COPY --from=`'d whole into `systems-ide`, then added to
+`PATH` — matching how Geiser actually finds each backend
+(`geiser-chez-binary` defaults to `"scheme"`, `geiser-gambit-binary`
+defaults to `"gsi"`, both confirmed directly from their own geiser
+packages' source, and both binaries land on `PATH` at exactly those
+names). Confirmed Doom's `+chez`/`+gambit` flags need nothing beyond
+this: neither adds any per-backend branch to `modules/lang/scheme/
+config.el` the way `+guile` does for `flycheck-guile` — both flags only
+add their respective `geiser-<backend>` package (confirmed directly
+from doomemacs's own `modules/lang/scheme/packages.el`), so the
+existing generic `use-package! geiser` block (REPL/eval/lookup
+handlers, localleader map) already covers them once the binary is
+findable.
+
+**Revisit if:** Ubuntu ever ships a current-enough `chezscheme`/`gambc`
+that the version gap closes (unlikely on the same release cadence apt
+has shown elsewhere in this file — Racket/Nu/ruff/stylua/lua-language-
+server are all in the same boat), or either upstream project starts
+publishing a genuine prebuilt Linux binary that would make a source
+build unnecessary.
+
+---
+
+## Gerbil: source build of the current v0.18.2 tag, reversed from an initial prebuilt-image approach
+
+**Date:** 2026-07-26
+**Status:** Active
+
+**Decision:** `josiah14/gerbil` builds Gerbil from source
+(`git clone --recurse-submodules --shallow-submodules --branch v0.18.2
+--depth 1`, `./configure --enable-poll && make && make install`),
+producing `josiah14/gerbil:0.18.2-ubuntu-26.04`.
+
+**This reverses this same session's first implementation**, which
+extracted `/opt/gerbil` from the official `gerbil/ubuntu:aarch64-master`
+Docker Hub image instead. That version was fully working and verified
+live (re-hosted binaries ran correctly on Ubuntu 26.04, `ldd` showed
+only `libc.so.6`/`libm.so.6`, confirmed `gerbil/gerbil` itself is
+Alpine/musl and would have failed outright, confirmed `gerbil/ubuntu`
+is the real Ubuntu/glibc variant) — but the pulled build reported
+`Gerbil v0.18.1-124-g3a9fc86f on Gambit v4.9.5-130-g09335d95`, built
+2023-10-18 (confirmed from the image's own file timestamps): three
+years stale relative to the current `v0.18.2` tag. **Reversed after
+being directly challenged on it** (Josiah: "2023 is 3 years old...
+that's a long time") — worth checking whether a source build was
+actually as costly as first assumed rather than accepting that
+staleness as the price of avoiding one.
+
+**It wasn't costly.** Gerbil bundles its own pinned Gambit as a git
+submodule since v0.18 (confirmed directly from cons.io's own build
+docs), so GitHub's tarball/zip archive endpoints — fine for Chez/Gambit
+above, since neither has submodules — don't work here; they omit
+submodule content entirely, leaving only an empty mount-point
+directory. A real `git clone --recurse-submodules` was required, the
+one genuine extra step relative to Chez/Gambit's plain curl+tarball
+pattern. Apt package list trimmed from upstream's own
+`dist/packages.mk` `ubuntu_packages` (confirmed directly from
+mighty-gerbils/gerbil's own build recipe) minus `rsync`/`rubygems`/
+`texinfo`, which that file only needs for its own fpm-based `.deb`/
+`.rpm` packaging pipeline, not for a plain prefix install. Built and
+verified live on the first attempt with no missing-dependency
+iteration needed: `gerbil -v` reports `Gerbil v0.18.2 on Gambit
+v4.9.7-6-g64f4d369` (its bundled Gambit lands almost exactly on the
+same v4.9.7 this project's own standalone `josiah14/gambit` builds,
+coincidentally), and `ldd` on the real `gerbil`/`gsc` binaries still
+shows only `libc.so.6`/`libm.so.6` — none of the native-extension
+`-dev` packages (leveldb/lmdb/nss3/ssl/xml2/yaml) end up linked into
+the core binaries themselves, only available for `gxpkg`-installed
+packages that actually use them.
+
+**Wrapping this in this project's own `josiah14/gerbil` tag (rather
+than building inline in `systems-ide`) still holds** even though the
+original "avoid coupling to an upstream image that might go stale"
+argument no longer applies the same way: it keeps `systems-ide` decoupled
+from Gerbil's own build recipe regardless of source, matching
+`josiah14/chez`/`josiah14/gambit`'s own shape.
+
+**Image size grew, expected given real version growth, not
+investigated further:** `/opt/gerbil` is ~821MB uncompressed (up from
+the old prebuilt image's ~489MB post-strip) — `lib/` alone grew from
+427MB to 498MB, consistent with ~2.75 years of real stdlib/srfi
+additions between v0.18.1 and v0.18.2, not bloat introduced by this
+build. The same `gerbil-strip` treatment (`strip --strip-all` via
+`readlink -f` through the `bin/ -> current/bin/` symlink chain) still
+applies to the two real ELF binaries before the final `COPY`, and the
+shipped image still ends at exactly one layer on top of `ubuntu:26.04`,
+same as `josiah14/chez`/`josiah14/gambit`.
+
+**gerbil-mode.el's package pin moved with the version bump:**
+`packages.el`'s `gerbil-mode` package now pins commit
+`07c8481588a8b07dbf05832687817cd398902ac0` (what the `v0.18.2` tag
+resolves to, confirmed via `gh api
+repos/mighty-gerbils/gerbil/commits/v0.18.2`) instead of the old
+prebuilt image's own bundled commit — this is also the commit where
+upstream rewrote `gerbil-mode.el` to a proper `define-derived-mode`,
+so the installed mode and the installed toolchain stay in lockstep.
+
+**Revisit if:** a future Gerbil release meaningfully changes its build
+prerequisites (new native dependency, submodule restructuring) in a way
+that breaks this apt package list, or upstream starts shipping genuine
+GitHub Release binary assets that would make a pinned prebuilt option
+viable again without the staleness tradeoff that sank the first
+attempt.
+
+---
+
