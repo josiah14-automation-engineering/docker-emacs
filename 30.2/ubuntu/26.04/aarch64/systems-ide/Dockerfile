@@ -14,6 +14,12 @@ FROM josiah14/nix:2.34.7-ubuntu-26.04 AS nix-source
 
 FROM josiah14/guix:1.5.0-ubuntu-26.04 AS guix-source
 
+FROM josiah14/chez:10.4.1-ubuntu-26.04 AS chez-source
+
+FROM josiah14/gambit:4.9.7-ubuntu-26.04 AS gambit-source
+
+FROM josiah14/gerbil:0.18.2-ubuntu-26.04 AS gerbil-source
+
 # --- Final image ---
 FROM ubuntu:26.04
 
@@ -391,6 +397,24 @@ COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config
 COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/direnv /home/${USERNAME}/.config/direnv
 COPY --from=guix-source --chown=${USERNAME}:${USERNAME} /gnu /gnu
 COPY --from=guix-source --chown=${USERNAME}:${USERNAME} /var/guix /var/guix
+# Chez/Gambit/Gerbil: same "COPY from a dedicated source image" shape as
+# nix-source/guix-source above, rather than building any of the three
+# inline in this Dockerfile -- see 30.2/ubuntu/26.04/aarch64/{chez,gambit,
+# gerbil}/Dockerfile for how each is actually built/obtained (all three
+# from source: Chez and Gambit because apt's own packages are stale
+# upstream, Gerbil because its own official Docker image was 3 years
+# stale -- see ROADMAP.md/DECISIONLOG.md Step 11.8 for the full
+# reasoning). Gambit stays a separate standalone install here rather than
+# reusing Gerbil's own bundled copy (Gerbil bundles Gambit as a pinned
+# submodule with no plain `gsi` on its PATH, only `gxi` -- see
+# DECISIONLOG.md's "Gambit stays a separate standalone install" entry).
+# Each of those images already places its own toolchain under
+# a single self-contained /opt/<name> directory, so the COPY here is a
+# single line per dialect, no different from the guix-source line above.
+COPY --from=chez-source --chown=${USERNAME}:${USERNAME} /opt/chez /opt/chez
+COPY --from=gambit-source --chown=${USERNAME}:${USERNAME} /opt/gambit /opt/gambit
+COPY --from=gerbil-source --chown=${USERNAME}:${USERNAME} /opt/gerbil /opt/gerbil
+ENV PATH="/opt/chez/bin:/opt/gambit/bin:/opt/gerbil/bin:${PATH}"
 
 USER ${USERNAME}
 ENV USER=${USERNAME}
@@ -762,6 +786,9 @@ COPY --chown=${USERNAME}:${USERNAME} fish-keybindings.el   /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} fish-config.el        /home/${USERNAME}/.config/doom/fish-config.el
 COPY --chown=${USERNAME}:${USERNAME} asm-config.el         /home/${USERNAME}/.config/doom/asm-config.el
 COPY --chown=${USERNAME}:${USERNAME} toml-config.el        /home/${USERNAME}/.config/doom/toml-config.el
+COPY --chown=${USERNAME}:${USERNAME} scheme-config.el      /home/${USERNAME}/.config/doom/scheme-config.el
+COPY --chown=${USERNAME}:${USERNAME} gerbil-config.el      /home/${USERNAME}/.config/doom/gerbil-config.el
+COPY --chown=${USERNAME}:${USERNAME} gerbil-keybindings.el /home/${USERNAME}/.config/doom/gerbil-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-keybindings.el     /home/${USERNAME}/.config/doom/go-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} go-config.el          /home/${USERNAME}/.config/doom/go-config.el
 COPY --chown=${USERNAME}:${USERNAME} nu-keybindings.el     /home/${USERNAME}/.config/doom/nu-keybindings.el

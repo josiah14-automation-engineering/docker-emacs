@@ -64,7 +64,9 @@ EOF
   cat > /tmp/smoketest/test.go <<'EOF'
 package main
 
-func main() {}
+func answer() int { return 42 }
+
+func main() { _ = answer() }
 EOF
   cat > /tmp/smoketest/test.rs <<'EOF'
 fn main() {
@@ -80,6 +82,24 @@ def main [] {
 }
 EOF
   cat > /tmp/smoketest/test.scm <<'EOF'
+;; -*- geiser-scheme-implementation: guile -*-
+(display "hi")
+(newline)
+EOF
+  cat > /tmp/smoketest/test-chez-auto.scm <<'EOF'
+;; Example Chez Scheme program
+(import (chezscheme))
+(display "hi")
+(newline)
+EOF
+  cat > /tmp/smoketest/test-gambit-auto.scm <<'EOF'
+;; Example Gambit Scheme program (gsi)
+(display "hi")
+(newline)
+EOF
+  cat > /tmp/smoketest/test-guile-auto.scm <<'EOF'
+#!/usr/bin/env guile
+!#
 (display "hi")
 (newline)
 EOF
@@ -96,8 +116,14 @@ EOF
 #lang rash
 (displayln "hi")
 EOF
+  cat > /tmp/smoketest/test.ss <<'EOF'
+(def (greet name) (displayln name))
+EOF
   cat > /tmp/smoketest/test.c <<'EOF'
-int main(void) { return 0; }
+int main(void) {
+    volatile int value = 42;
+    return value == 42 ? 0 : 1;
+}
 EOF
   cat > /tmp/smoketest/test.cpp <<'EOF'
 int main() { return 0; }
@@ -198,6 +224,13 @@ EOF
 cmake_minimum_required(VERSION 3.10)
 project(smoketest)
 EOF
+  # Nested add_subdirectory()-shaped target under the top-level project above --
+  # exercises +cmake--root's climb-past-nested-CMakeLists.txt behavior, not just
+  # the plain single-CMakeLists.txt case the fixture above already covers.
+  mkdir -p /tmp/smoketest/nested-cmake
+  cat > /tmp/smoketest/nested-cmake/CMakeLists.txt <<'EOF'
+add_subdirectory(.)
+EOF
   cat > /tmp/smoketest/test.bats <<'EOF'
 #!/usr/bin/env bats
 
@@ -206,6 +239,7 @@ EOF
   [ "$result" -eq 4 ]
 }
 EOF
+  gcc -g -O0 /tmp/smoketest/test.c -o /tmp/smoketest/test-c-debug
   emacs --daemon > /tmp/smoketest/daemon.log 2>&1 &
   for _ in $(seq 1 60); do
     emacsclient --eval 1 >/dev/null 2>&1 && return
@@ -222,6 +256,15 @@ teardown_file() {
 
 eval_elisp() {
   emacsclient --eval "$1"
+}
+
+lsp_servers_for() {
+  eval_elisp "(progn
+    (find-file \"$1\")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (mapcar #'lsp--workspace-server-id (lsp-workspaces)))"
 }
 
 @test "bash-language-server is installed and reports a version" {
@@ -458,10 +501,10 @@ eval_elisp() {
 # calling it from the mode hook forces lsp-mode.el to load synchronously even
 # though the actual server handshake is scheduled for the next idle moment.
 # Asserting the minor mode is ON here would race that handshake.
-@test "lsp-mode loads when a shell buffer is opened ((sh +lsp))" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.bash") (featurep (quote lsp-mode)))'
+@test "bash-ls connects when a shell buffer is opened ((sh +lsp))" {
+  run lsp_servers_for /tmp/smoketest/test.bash
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "t" ]]
+  [[ "$output" =~ "bash-ls" ]]
 }
 
 @test "opening a .go file activates go-mode" {
@@ -470,10 +513,32 @@ eval_elisp() {
   [[ "$output" =~ "go-mode" ]]
 }
 
-@test "lsp-mode loads and flycheck-golangci-lint is active in go buffers" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.go") (list (featurep (quote lsp-mode)) (bound-and-true-p flycheck-mode)))'
+@test "gopls connects and flycheck is active in go buffers" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.go")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (list (mapcar (function lsp--workspace-server-id) (lsp-workspaces))
+          (bound-and-true-p flycheck-mode)))'
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "(t t)" ]]
+  [[ "$output" =~ "gopls" ]]
+  [[ "$output" =~ "t)" ]]
+}
+
+@test "gopls resolves a real definition request" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.go")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline)
+                  (not (lsp--capability-for-method "textDocument/definition")))
+        (sleep-for 0.2)))
+    (goto-char (point-min))
+    (search-forward "answer()" nil nil 2)
+    (backward-char 3)
+    (lsp-request "textDocument/definition" (lsp--text-document-position-params)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "test.go" ]]
 }
 
 @test "opening a .rs file activates rustic-mode" {
@@ -506,16 +571,22 @@ eval_elisp() {
   [[ "$output" =~ "bash" ]]
 }
 
+@test "bash-ls connects for bats-mode buffers" {
+  run lsp_servers_for /tmp/smoketest/test.bats
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "bash-ls" ]]
+}
+
 @test "opening a .nu file activates nushell-ts-mode" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.nu") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "nushell-ts-mode" ]]
 }
 
-@test "lsp-mode loads when a nushell buffer is opened (nu-config.el's local-vars hook)" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.nu") (featurep (quote lsp-mode)))'
+@test "nushell-ls connects when a nushell buffer is opened" {
+  run lsp_servers_for /tmp/smoketest/test.nu
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "t" ]]
+  [[ "$output" =~ "nushell-ls" ]]
 }
 
 @test "guile is installed and reports a version" {
@@ -530,6 +601,22 @@ eval_elisp() {
   [[ "$output" =~ "scheme-mode" ]]
 }
 
+@test "Geiser activates and evaluates through the Guile REPL" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.scm")
+    (let ((source (current-buffer)))
+      (save-window-excursion (geiser-repl-switch nil (quote guile) source))
+      (with-current-buffer source
+        (goto-char (point-max))
+        (let ((start (point)))
+          (insert "\n(+ 20 22)")
+          (list (bound-and-true-p geiser-mode)
+                (geiser-eval-region/wait start (point) 20))))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(t" ]]
+  [[ "$output" =~ "42" ]]
+}
+
 @test "flycheck-guile connects for scheme-mode buffers ((scheme +guile))" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.scm") (list (bound-and-true-p flycheck-mode) (flycheck-get-checker-for-buffer)))'
   [ "$status" -eq 0 ]
@@ -540,6 +627,60 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.scm") (key-binding (kbd "SPC m f")))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+# Chez and Gambit both ride on the same generic scheme-mode/apheleia/
+# localleader wiring guile's own tests above already cover (Doom's +chez/
+# +gambit flags add nothing beyond the geiser-chez/geiser-gambit
+# packages themselves -- confirmed against doomemacs's own
+# modules/lang/scheme/config.el, no per-backend config.el branch exists
+# for either). Neither Chez nor Gambit has any flycheck/LSP checker
+# package in this image (only Guile does, via flycheck-guile) -- so
+# there is nothing to test there beyond binary presence.
+@test "chez is installed and reports the pinned version (10.4.1)" {
+  run scheme --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "10.4.1" ]]
+}
+
+@test "gambit is installed and reports the pinned version (4.9.7)" {
+  run gsi -v
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "v4.9.7" ]]
+}
+
+# These exercise the actual scheme-config.el fix (DECISIONLOG.md's
+# "Multi-backend Geiser ... hangs whole daemon" entry): each fixture
+# below carries only a content-based giveaway (no `-*- geiser-scheme-
+# implementation: ... -*-` file-local override like test.scm above),
+# so a correct resolution here proves `geiser-impl--guess' picks the
+# right backend via `check-buffer' on its own. Calling `geiser-impl--
+# guess' with no PROMPT arg is safe under a headless emacsclient --
+# eval: per its definition in geiser-impl.el, it returns nil rather
+# than falling through to the interactive `y-or-n-p' prompt that used
+# to hang the daemon.
+@test "opening a Chez-marked .scm file auto-detects chez (check-buffer, no prompt)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test-chez-auto.scm") (symbol-name (geiser-impl--guess)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "chez" ]]
+}
+
+@test "opening a Gambit-marked .scm file auto-detects gambit (check-buffer, no prompt)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test-gambit-auto.scm") (symbol-name (geiser-impl--guess)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "gambit" ]]
+}
+
+@test "opening a Guile-marked .scm file auto-detects guile (check-buffer, no prompt)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test-guile-auto.scm") (symbol-name (geiser-impl--guess)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "guile" ]]
+}
+
+@test "flycheck-guile also connects for a content-auto-detected (non-pinned) Guile buffer" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test-guile-auto.scm") (list (bound-and-true-p flycheck-mode) (flycheck-get-checker-for-buffer)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(t guile)" ]]
 }
 
 @test "racket is installed and reports the pinned version (9.2)" {
@@ -630,6 +771,39 @@ eval_elisp() {
   [[ "$output" == "2" ]]
 }
 
+@test "gerbil is installed and reports a version" {
+  run gerbil -v
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Gerbil" ]]
+}
+
+@test "opening a .ss file activates gerbil-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "gerbil-mode" ]]
+}
+
+@test "gerbil localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+@test "gerbil localleader eval uses cmuscheme, not inherited Geiser" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (key-binding (kbd "SPC m e d")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "scheme-send-definition" ]]
+}
+
+@test "gerbil completion suggests vocabulary and local symbols" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.ss")
+    (list (not (null (member "package:" (company-keywords (quote candidates) "pa"))))
+          (not (null (member "greet" (company-dabbrev-code (quote candidates) "gr"))))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(t t)' ]]
+}
+
 @test "opening a .c file activates c-mode" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
@@ -660,16 +834,16 @@ eval_elisp() {
   [[ "$output" =~ "cmake-mode" ]]
 }
 
-@test "lsp-mode loads when a c-mode buffer is opened ((cc +lsp))" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (featurep (quote lsp-mode)))'
+@test "clangd connects when a c-mode buffer is opened ((cc +lsp))" {
+  run lsp_servers_for /tmp/smoketest/test.c
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "t" ]]
+  [[ "$output" =~ "clangd" ]]
 }
 
-@test "lsp-mode loads when a cmake-mode buffer is opened ((cc +lsp))" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/CMakeLists.txt") (featurep (quote lsp-mode)))'
+@test "cmakels connects when a cmake-mode buffer is opened ((cc +lsp))" {
+  run lsp_servers_for /tmp/smoketest/CMakeLists.txt
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "t" ]]
+  [[ "$output" =~ "cmakels" ]]
 }
 
 @test "opening a .lua file activates lua-mode" {
@@ -678,10 +852,10 @@ eval_elisp() {
   [[ "$output" =~ "lua-mode" ]]
 }
 
-@test "lsp-mode loads when a lua-mode buffer is opened ((lua +lsp))" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.lua") (featurep (quote lsp-mode)))'
+@test "lua-language-server connects when a lua-mode buffer is opened" {
+  run lsp_servers_for /tmp/smoketest/test.lua
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "t" ]]
+  [[ "$output" =~ "lua-language-server" ]]
 }
 
 @test "opening a .py file activates python-mode" {
@@ -690,10 +864,10 @@ eval_elisp() {
   [[ "$output" =~ "python-mode" ]]
 }
 
-@test "lsp-mode loads when a python-mode buffer is opened ((python +lsp +pyright))" {
-  run eval_elisp '(progn (find-file "/tmp/smoketest/test.py") (featurep (quote lsp-mode)))'
+@test "pyright connects when a python-mode buffer is opened" {
+  run lsp_servers_for /tmp/smoketest/test.py
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "t" ]]
+  [[ "$output" =~ "pyright" ]]
 }
 
 @test "opening a .rb file activates ruby-mode" {
@@ -794,6 +968,40 @@ eval_elisp() {
   [[ "$output" =~ "c++-mode" ]]
 }
 
+@test "dape launches gdb, hits a breakpoint, and reads a real local value" {
+  run eval_elisp '(progn
+    (require (quote dape))
+    (find-file "/tmp/smoketest/test.c")
+    (goto-char (point-min))
+    (forward-line 2)
+    (dape-breakpoint-remove-all)
+    (dape-breakpoint-toggle)
+    (let ((config (copy-tree (alist-get (quote gdb) dape-configs))))
+      (setq config (plist-put config :program "/tmp/smoketest/test-c-debug"))
+      (setq config (plist-put config (quote command-cwd) "/tmp/smoketest/"))
+      (dape config))
+    (let ((deadline (+ (float-time) 30)) conn frame result error)
+      (while (and (< (float-time) deadline)
+                  (not (setq conn (dape--live-connection (quote stopped) t))))
+        (sleep-for 0.2))
+      (while (and conn (< (float-time) deadline)
+                  (not (setq frame (dape--current-stack-frame conn))))
+        (sleep-for 0.2))
+      (when frame
+        (let ((dape--request-blocking t))
+          (dape--evaluate-expression
+           conn (plist-get frame :id) "value" "watch"
+           (lambda (body request-error)
+             (setq result (plist-get body :result)
+                   error request-error)))))
+      (when conn (dape-kill (dape--root-of conn)))
+      (list (plist-get frame :name) result error)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "main" ]]
+  [[ "$output" =~ "42" ]]
+  [[ "$output" =~ "nil)" ]]
+}
+
 # Regression test for a real bug: dape's own built-in gdb config never
 # listed asm-mode (only c-mode/c++-mode/hare-mode variants), and
 # +dape-resolve-cwd's fallback (dape-command-cwd) resolved to the
@@ -833,6 +1041,75 @@ eval_elisp() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "rustic-mode" ]]
   [[ "$output" =~ "rust-mode" ]]
+}
+
+# Regression test: lldb-dap's launch handler treats a denied personality()
+# syscall (ASLR-disable, blocked by this container's default seccomp profile)
+# as fatal, unlike gdb which just warns -- :disableASLR nil skips the syscall
+# entirely. plist-member (not plist-get) used deliberately: plist-get alone
+# can't distinguish "key present with value nil" from "key absent", and the
+# whole point here is confirming the patch actually added the key.
+@test "lldb-dap/lldb-vscode dape configs have :disableASLR nil (seccomp workaround, DECISIONLOG.md)" {
+  run eval_elisp '(progn (require (quote dape))
+    (list (plist-member (alist-get (quote lldb-dap) dape-configs) :disableASLR)
+          (plist-member (alist-get (quote lldb-vscode) dape-configs) :disableASLR)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(:disableASLR nil" ]]
+}
+
+# Regression test: dape sends `launch` unconditionally, racing lldb-dap's own
+# `initialized` event -- if breakpoints (sent on `initialized`) land after
+# `launch` already took effect, the program just runs to completion, ignored.
+# :stopOnEntry t halts at the first instruction, giving `setBreakpoints` time
+# to land first. See DECISIONLOG.md's "lldb-dap ignores every breakpoint" entry.
+@test "lldb-dap/lldb-vscode dape configs have :stopOnEntry t (launch/breakpoint race fix)" {
+  run eval_elisp '(progn (require (quote dape))
+    (list (plist-get (alist-get (quote lldb-dap) dape-configs) :stopOnEntry)
+          (plist-get (alist-get (quote lldb-vscode) dape-configs) :stopOnEntry)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(t t)" ]]
+}
+
+# Regression test: dlv's own command-cwd (dape's default, ultimately
+# project-current -> project-projectile) resolves to the outer git root for
+# any Go project nested inside this repo's own tree, not the actual go.mod
+# directory -- +dape-go-root walks up for go.mod directly instead.
+@test "dlv's dape command-cwd resolves via +dape-go-root, not dape's own project-root guess" {
+  run eval_elisp '(progn (require (quote dape)) (eq (plist-get (alist-get (quote dlv) dape-configs) (quote command-cwd)) (function +dape-go-root)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "t" ]]
+}
+
+# dape has no built-in Lua config -- this is a from-scratch entry, not a
+# patch to an upstream one like gdb/lldb-dap/dlv above. Verifies the shape
+# specific to local-lua-debugger-vscode's own launch schema: a nested
+# :program plist (:lua/:file, not a bare string like every other config in
+# this file) and an explicit :extensionPath (not derivable by the adapter
+# itself -- normally injected by VS Code's extension host).
+@test "dape's lua-local debug config wires local-lua-debugger-vscode correctly" {
+  run eval_elisp '(progn (require (quote dape))
+    (let ((config (alist-get (quote lua-local) dape-configs)))
+      (list (plist-get config (quote modes))
+            (plist-get config :type)
+            (functionp (plist-get (plist-get config :program) :file))
+            (stringp (plist-get config :extensionPath)))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "(lua-mode)" ]]
+  [[ "$output" =~ "lua-local" ]]
+  [[ "$output" =~ "t t)" ]]
+}
+
+# +dape-lua-file/+dape-lua-cwd deliberately use buffer-file-name directly
+# rather than a marker-file walk -- a Lua script being debugged rarely has a
+# project manifest to anchor a root search on (see dape-config.el's own
+# Commentary on this). Confirms both resolve against the real buffer, not a
+# stale/guessed default-directory.
+@test "+dape-lua-file/+dape-lua-cwd resolve the current buffer's own file directly" {
+  run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test.lua")
+    (list (string= (+dape-lua-file) (buffer-file-name))
+          (string= (+dape-lua-cwd) (file-name-directory (buffer-file-name)))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(t t)" ]]
 }
 
 @test "global debugger keybinding SPC d d resolves to dape (config/default +bindings)" {
@@ -935,6 +1212,17 @@ eval_elisp() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/CMakeLists.txt") (list (key-binding (kbd "SPC m b c")) (key-binding (kbd "SPC m b b")) (key-binding (kbd "SPC m b r")) (key-binding (kbd "SPC m b d"))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(+cmake/configure +cmake/build +cmake/rebuild +cmake/clean)" ]]
+}
+
+# Regression test: +cmake--root must climb PAST a nested add_subdirectory()
+# CMakeLists.txt (not independently buildable) to the outermost project
+# root, not stop at the nearest one -- confirmed against the nested fixture
+# under /tmp/smoketest/nested-cmake/, whose own outer ancestor is the
+# top-level /tmp/smoketest/CMakeLists.txt fixture used by the test above.
+@test "+cmake--root climbs a nested CMakeLists.txt to the outermost project root" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/nested-cmake/CMakeLists.txt") (string= (+cmake--root) "/tmp/smoketest/"))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "t" ]]
 }
 
 @test "opening a .fish file activates fish-mode" {
@@ -1074,6 +1362,34 @@ eval_elisp() {
     (mapcar (function lsp--workspace-server-id) (lsp-workspaces)))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "taplo" ]]
+}
+
+# polyglot-keybindings.el: cross-cutting dev-tooling, not language-specific,
+# so placed here rather than under any one language's test group.
+@test "SPC l w S keybinding resolves to lsp-pick-root (polyglot-keybindings.el)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC l w S")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "lsp-pick-root" ]]
+}
+
+# Doesn't call lsp-pick-root itself -- it ends in (call-interactively #'lsp),
+# which reaches lsp-mode's real interactive root-selection prompt with no
+# way to answer it under headless emacsclient (same class of hang the
+# multi-backend Geiser fix elsewhere in this file avoids by never reaching
+# an unanswerable interactive prompt). Exercises the same buffer-local
+# override/restore mechanism directly instead: lsp-restore-auto-guess-root
+# has no other built-in way to undo a buffer-local lsp-auto-guess-root
+# override, so this confirms it actually kills the local binding rather
+# than just setting it back to a guessed value.
+@test "lsp-restore-auto-guess-root kills the buffer-local lsp-auto-guess-root override" {
+  run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test.c")
+    (let ((before lsp-auto-guess-root))
+      (setq-local lsp-auto-guess-root nil)
+      (let ((during (list lsp-auto-guess-root (local-variable-p (quote lsp-auto-guess-root)))))
+        (lsp-restore-auto-guess-root)
+        (list before during lsp-auto-guess-root (local-variable-p (quote lsp-auto-guess-root))))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(t (nil t) t nil)" ]]
 }
 
 @test "Doom loaded without error (nonzero package/module count)" {

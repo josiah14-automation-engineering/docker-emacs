@@ -81,6 +81,9 @@ EOF
 #lang rash
 (displayln "hi")
 EOF
+  cat > /tmp/smoketest/test.ss <<'EOF'
+(def (greet name) (displayln name))
+EOF
   cat > /tmp/smoketest/test-fmt.rkt <<'EOF'
 #lang racket
 (displayln
@@ -495,6 +498,25 @@ eval_elisp() {
   [[ "$output" =~ "nix-mode" ]]
 }
 
+# Chez and Gambit both ride on the same generic scheme-mode/apheleia/
+# localleader wiring guile's own tests cover on the aarch64 tree (Doom's
+# +chez/+gambit flags add nothing beyond the geiser-chez/geiser-gambit
+# packages themselves -- confirmed against doomemacs's own
+# modules/lang/scheme/config.el, no per-backend config.el branch exists
+# for either). So the only genuinely new thing to check here is that
+# each binary is actually present and the pinned version that was built.
+@test "chez is installed and reports the pinned version (10.4.1)" {
+  run scheme --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "10.4.1" ]]
+}
+
+@test "gambit is installed and reports the pinned version (4.9.7)" {
+  run gsi -v
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "v4.9.7" ]]
+}
+
 @test "racket is installed and reports the pinned version (9.2)" {
   run racket --version
   [ "$status" -eq 0 ]
@@ -583,6 +605,39 @@ eval_elisp() {
   # otherwise-correct plain-string comparison fail, a test bug, not a real
   # one).
   [[ "$output" == "2" ]]
+}
+
+@test "gerbil is installed and reports a version" {
+  run gerbil -v
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "Gerbil" ]]
+}
+
+@test "opening a .ss file activates gerbil-mode" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (symbol-name major-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "gerbil-mode" ]]
+}
+
+@test "gerbil localleader keybindings resolve (format buffer)" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (key-binding (kbd "SPC m f")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "apheleia-format-buffer" ]]
+}
+
+@test "gerbil localleader eval uses cmuscheme, not inherited Geiser" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (key-binding (kbd "SPC m e d")))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "scheme-send-definition" ]]
+}
+
+@test "gerbil completion suggests vocabulary and local symbols" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.ss")
+    (list (not (null (member "package:" (company-keywords (quote candidates) "pa"))))
+          (not (null (member "greet" (company-dabbrev-code (quote candidates) "gr"))))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(t t)' ]]
 }
 
 @test "opening a .bats file activates bats-mode with the bash dialect" {

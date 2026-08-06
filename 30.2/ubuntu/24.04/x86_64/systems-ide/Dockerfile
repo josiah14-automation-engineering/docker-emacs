@@ -17,6 +17,12 @@ FROM josiah14/nix:2.34.7-ubuntu-24.04 AS nix-source
 
 FROM josiah14/guix:1.5.0-ubuntu-24.04 AS guix-source
 
+FROM josiah14/chez:10.4.1-ubuntu-24.04 AS chez-source
+
+FROM josiah14/gambit:4.9.7-ubuntu-24.04 AS gambit-source
+
+FROM josiah14/gerbil:0.18.2-ubuntu-24.04 AS gerbil-source
+
 # --- Final image ---
 FROM ubuntu:24.04
 
@@ -375,6 +381,14 @@ COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config
 COPY --from=nix-source --chown=${USERNAME}:${USERNAME} /home/${USERNAME}/.config/direnv /home/${USERNAME}/.config/direnv
 COPY --from=guix-source --chown=${USERNAME}:${USERNAME} /gnu /gnu
 COPY --from=guix-source --chown=${USERNAME}:${USERNAME} /var/guix /var/guix
+# Chez/Gambit/Gerbil: same "COPY from a dedicated source image" shape as
+# nix-source/guix-source above -- see the aarch64 tree's own Dockerfile
+# for the full reasoning (mirrored here, not independently re-verified
+# on x86_64 this session).
+COPY --from=chez-source --chown=${USERNAME}:${USERNAME} /opt/chez /opt/chez
+COPY --from=gambit-source --chown=${USERNAME}:${USERNAME} /opt/gambit /opt/gambit
+COPY --from=gerbil-source --chown=${USERNAME}:${USERNAME} /opt/gerbil /opt/gerbil
+ENV PATH="/opt/chez/bin:/opt/gambit/bin:/opt/gerbil/bin:${PATH}"
 
 USER ${USERNAME}
 ENV USER=${USERNAME}
@@ -752,6 +766,8 @@ COPY --chown=${USERNAME}:${USERNAME} bats-keybindings.el   /home/${USERNAME}/.co
 COPY --chown=${USERNAME}:${USERNAME} bats-config.el        /home/${USERNAME}/.config/doom/bats-config.el
 COPY --chown=${USERNAME}:${USERNAME} all-lisps-config.el   /home/${USERNAME}/.config/doom/all-lisps-config.el
 COPY --chown=${USERNAME}:${USERNAME} guile-keybindings.el  /home/${USERNAME}/.config/doom/guile-keybindings.el
+COPY --chown=${USERNAME}:${USERNAME} gerbil-config.el      /home/${USERNAME}/.config/doom/gerbil-config.el
+COPY --chown=${USERNAME}:${USERNAME} gerbil-keybindings.el /home/${USERNAME}/.config/doom/gerbil-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} fish-keybindings.el   /home/${USERNAME}/.config/doom/fish-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} fish-config.el        /home/${USERNAME}/.config/doom/fish-config.el
 COPY --chown=${USERNAME}:${USERNAME} asm-config.el         /home/${USERNAME}/.config/doom/asm-config.el

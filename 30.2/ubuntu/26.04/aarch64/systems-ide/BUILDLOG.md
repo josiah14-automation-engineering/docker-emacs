@@ -3058,3 +3058,83 @@ flight-tests source changes mirrored over, but was **not** rebuilt or
 tested this session -- deliberately deferred to the batch x86_64 pass
 already planned, same status as every other language's x86_64 gap this
 project has accumulated so far.
+
+### 2026-08-05 — Gerbil/Geiser freeze path fixed; completion added; aarch64 rebuilt 114/114
+
+Re-investigated the previously recorded GUI freeze against a live
+`doom-systems-ide-aarch64` container. The active file was genuinely
+`hello.ss` in literal `gerbil-mode`; `geiser-mode` was nil and recursion
+depth was zero. The discrepancy was in the keymap, not mode activation:
+Doom's `:lang scheme` localleader entries live on `scheme-mode-map`, and
+upstream `gerbil-mode-map` inherits that map. Consequently `SPC m e d`
+resolved to `geiser-eval-definition` even with Geiser disabled. Calling
+it without a Geiser connection entered Emacs's debugger and a
+`recursive-edit`, presenting as a frozen editor.
+
+`gerbil-keybindings.el` now shadows the inherited `SPC m e ...` subtree
+with upstream gerbil-mode/cmuscheme commands for buffer, last-sexp,
+definition, and region evaluation, including the uppercase "and switch"
+variants. `gerbil-config.el` gained the missing buffer-and-switch command
+rather than advertising a switch while calling the non-switching
+function. A regression asserts `SPC m e d` resolves exactly to
+`scheme-send-definition`.
+
+The pending plain `(add-hook 'scheme-mode-hook #'geiser-mode)` edit was
+also corrected before rebuild. Parent hooks run for derived modes, so
+that direct hook would activate Geiser inside Gerbil.
+`scheme-config.el` now uses a private `+geiser--activate-mode-h` wrapper
+that calls `geiser-mode` only when `major-mode` is literally
+`scheme-mode`.
+
+Live GUI testing exposed a separate completion gap. `company-mode` was
+enabled, but upstream gerbil-mode supplies no useful CAPF, Company
+backend, Geiser backend, or LSP support. Current Gerbil upstream master
+was fetched and compared directly with pinned v0.18.2: its
+`etc/gerbil-mode.el` is unchanged and still has no completion API. A
+buffer-only dabbrev prototype suggested local `greet`, `hello`, `def`,
+and `displayln` symbols but no language vocabulary. A second prototype
+scanned process-global `scheme-indent-function` symbol properties; it
+returned hundreds of load-order-dependent symbols from unrelated loaded
+Scheme packages and was deleted during architecture review.
+
+The retained completion is deliberately smaller and decoupled:
+Company's installed `scheme-mode` keyword vocabulary is reused for
+`gerbil-mode`, Gerbil's real top-level `package:` declaration is
+prepended, and `company-dabbrev-code` supplies buffer-local symbols. The
+keyword and dabbrev backends are grouped with `:separate`; existing
+`company-capf` and `company-yasnippet` remain. The dabbrev minimum is set
+buffer-locally to 3 so `def` is not filtered by Company's default of 4.
+This is editor assistance, not claimed semantic completion: Gerbil
+accepts `define` (confirmed directly with pinned `gxi`) but Company's
+stock Scheme dictionary omits it. The user explicitly accepted this
+ceiling rather than forking Gerbil or writing a Geiser backend now.
+
+All touched Elisp was audited against repository-root `AGENTS.md`,
+`ELISP-STYLE-GUIDE.md`, `ELISP-ARCHITECTURE-GUIDE.md`,
+`DOOM-EMACS-GUIDE.md`, and neighboring files. Language configuration and
+bindings remain separated; private/public names follow the double-hyphen
+rule; Doom's `after!`, `add-hook!`, `map!`, and
+`set-company-backend!` are used; Commentary/Code/provide/footer structure
+matches the directory. The aarch64 and x86_64 Gerbil Elisp files are
+byte-for-byte identical. The audit also found that x86_64's `config.el`
+loaded the Gerbil files but its Dockerfile never copied them; both COPY
+lines were added. x86_64 remains unbuilt and untested.
+
+The aarch64 image rebuilt successfully through Doom's clean sync/native
+compilation. Full `smoketest.bats` in a dedicated disposable container
+passed **114/114**, including Scheme activation, Gerbil mode selection,
+eval routing, completion vocabulary/local symbols, and final Doom load.
+A fresh GUI from that rebuilt image (no manual host-file loads) showed
+`gerbil-mode`, `geiser-mode` nil, `SPC m e d` ->
+`scheme-send-definition`, the shipped combined Company backends,
+`package:` completion, and recursion depth zero.
+
+Two earlier GUI disappearances were test-harness errors, not Gerbil
+crashes: `smoketest.bats` was mistakenly run inside the GUI container.
+Docker events showed the Bats exec exit 137 immediately before Emacs PID
+1 exited cleanly and the `--rm` container disappeared. Smoke and GUI runs
+must use separate containers. **Still required before completion:**
+manually invoke `SPC m e D` and `SPC m e e` in the rebuilt GUI, confirm
+gxi receives the forms/output, the editor stays responsive, recursion
+depth remains zero, and no recursive-debug `*Backtrace*` appears. Exact
+steps are in `GERBIL_GUI_HANDOFF.md`.

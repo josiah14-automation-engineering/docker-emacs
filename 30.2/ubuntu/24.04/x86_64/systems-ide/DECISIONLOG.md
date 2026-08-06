@@ -808,3 +808,92 @@ same way the aarch64 tree's build was verified.
 
 ---
 
+## Gambit stays a separate standalone install, not shared with Gerbil's own bundled copy (mirrored from the aarch64 tree)
+
+**Date:** 2026-07-26
+**Status:** Active
+
+**Decision:** `systems-ide` keeps `josiah14/gambit` installed alongside
+`josiah14/gerbil`, rather than pointing Doom's `+gambit` flag /
+`geiser-gambit` at Gerbil's own bundled Gambit copy.
+
+**Rationale (full detail in the aarch64 tree's own DECISIONLOG.md,
+confirmed live there, not independently re-checked on x86_64):**
+Gerbil's own `bin/` has `gsc` (Gambit's compiler) but no plain `gsi` --
+only `gxi`, Gerbil's *own* REPL layered on top of Gambit. Since
+`geiser-gambit-binary` defaults to `"gsi"`, repointing it at Gerbil's
+install would either fail outright or silently substitute Gerbil's
+dialect for plain Gambit -- not a safe consolidation. The ~371MB extra
+image size and second Gambit version to track are accepted costs of
+keeping the two genuinely independent.
+
+**Revisit if:** the aarch64 tree's own entry is revisited (Gerbil ever
+ships a plain `gsi`, or image size becomes a real constraint).
+
+---
+
+## Multi-backend Geiser (`+chez +gambit +guile`) hangs the whole daemon on ambiguous `.scm` files — root-caused on the aarch64 tree, fix designed, not yet built
+
+**Date:** 2026-07-26
+**Status:** Active — blocks Step 11.8 completion (both trees; this is
+elisp/Geiser behavior, not architecture-specific, so it applies here
+too even though it was only reproduced live on aarch64)
+
+**Rationale (full detail in the aarch64 tree's own DECISIONLOG.md):**
+running the full `smoketest.bats` suite hung the entire Emacs daemon
+(confirmed: even an unrelated `emacsclient --eval '(+ 1 1)'` hung) on
+the pre-existing `.scm`/`scheme-mode` test. Root cause, read directly
+from `emacsmirror/geiser`'s own source: with only one Geiser backend
+active (this project's state before today), `geiser-impl--guess` has
+a fast path that skips all guessing. With three backends
+(`+chez +gambit +guile`) that shortcut no longer applies, and failing
+every other resolution step, `geiser-mode.el` unconditionally prompts
+interactively (`completing-read`) on activation — which blocks forever
+under a non-interactive `emacsclient` call with no frame to prompt
+against. Gerbil is confirmed unaffected (Geiser's own activation guard
+is an exact `(eq major-mode 'scheme-mode)` check, not
+`derived-mode-p`-aware, so `gerbil-mode` buffers never trigger it).
+
+**Decision (see aarch64 tree for the full design writeup):** author a
+`check-buffer` content-detection heuristic for Chez ourselves
+(Gambit and Guile already have one each; Chez's own package has none),
+hooked in additively via `after! geiser-chez` without touching the
+pinned package, using confirmed-real Chez-specific markers (the
+`(chezscheme)` library name, `#!eof`/`#!bwp`-style reader syntax).
+Persist project/directory-tree choices via Emacs's own
+`.dir-locals.el` + `add-dir-local-variable` (already the exact
+mechanism Geiser's own guess sequence checks first, via
+`hack-local-variables`) rather than inventing a new mechanism. Keep
+the existing interactive prompt as the fallback for genuinely
+undetectable files, but offer to persist the answer via
+`add-dir-local-variable` when the user responds.
+
+**Not yet done:** none of this is implemented yet. Step 11.8 cannot be
+marked complete on either tree until it lands and
+`smoketest.bats` runs clean end-to-end.
+
+---
+
+## Multi-backend Scheme elisp will ship as its own git repo/Doom package, not a Docker "scheme image"
+
+**Date:** 2026-07-26
+**Status:** Active — direction decided, nothing built or moved yet
+
+**Rationale (full detail in the aarch64 tree's own DECISIONLOG.md):**
+the custom elisp needed to make Chez/Gambit/Guile coexist (the Chez
+`check-buffer` heuristic + `.dir-locals.el` persistence helper from
+the entry above), plus the Gerbil-specific glue already written
+(`gerbil-config.el`/`gerbil-keybindings.el`), will be needed again
+unchanged by the standalone Lisp IDE planned for later. Decided to
+package it as its own dedicated git repo, consumed via Doom's
+`package!` + `:recipe (:host github ...)` + `:pin` — the same
+mechanism this project already uses to pull `gerbil-mode.el` itself —
+rather than a Docker "scheme image" (`COPY --from=`, the shape every
+other source image in this project uses, but one that exists
+specifically for compiled toolchains/binaries, not a handful of
+`.el` files that straight.el's own `:files`/`:pin` already versions
+and selects more naturally).
+
+**Not yet done:** no new repository exists yet, and no code has
+moved. Exact repo name/scope still to be decided when this is
+actually built.

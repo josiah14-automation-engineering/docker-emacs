@@ -63,7 +63,7 @@
        (racket +lsp)
        (ruby +lsp)
        (rust +lsp)
-       (scheme +guile)
+       (scheme +chez +gambit +guile)
        (sh +lsp)
        yaml
        (zig +lsp)

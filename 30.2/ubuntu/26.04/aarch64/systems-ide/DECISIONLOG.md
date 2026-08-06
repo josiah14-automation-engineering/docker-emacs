@@ -1119,3 +1119,311 @@ attempt.
 
 ---
 
+## Gambit stays a separate standalone install, not shared with Gerbil's own bundled copy
+
+**Date:** 2026-07-26
+**Status:** Active
+
+**Decision:** `systems-ide` keeps `josiah14/gambit` (standalone Gambit
+`v4.9.7`) installed alongside `josiah14/gerbil`, rather than pointing
+Doom's `+gambit` flag / `geiser-gambit` at the copy of Gambit already
+bundled inside Gerbil's own install.
+
+**Rationale:** Raised as a question — Gerbil bundles its own pinned
+Gambit as a git submodule (see the entry above), so using that copy for
+both purposes looked like it might remove a redundant ~371MB image
+layer and a second version to track. Checked live rather than assumed:
+`/opt/gerbil/bin/` has `gsc` (Gambit's compiler, used internally by
+Gerbil's own build pipeline) but **no plain `gsi`** — only `gxi`, which
+is Gerbil's *own* REPL, already loaded with Gerbil's macro/module layer
+on top of Gambit. `geiser-gambit-binary` defaults to `"gsi"` (confirmed
+directly from the `geiser-gambit` package's own source), so pointing it
+at Gerbil's install would either fail outright (no such binary) or
+silently substitute Gerbil's own dialect for plain Gambit if repointed
+at `gxi` instead — a functionality swap, not a safe consolidation, and
+exactly the kind of "does version parity actually hold" assumption this
+project has been burned by trusting once already (see the Guile/`guix-
+source` entry above).
+
+**The cost of keeping both, accepted rather than hidden:** ~371MB extra
+image size, and two independent Gambit versions in the image at once
+(the standalone `v4.9.7` and Gerbil's own bundled `v4.9.7-6-g64f4d369`,
+a few commits ahead). Accepted because it matches how every other
+language in this image is handled — its own explicitly pinned install,
+not inherited from whatever version a downstream tool happens to
+bundle — and because the alternative doesn't actually work as a drop-in
+replacement, not just because of the size/version-tracking cost.
+
+**Revisit if:** Gerbil's own `bin/` ever ships a plain `gsi` alongside
+`gxi` (unlikely — no indication upstream considers this a gap to close,
+since `gxi` is Gerbil's intended REPL entry point), or image size
+becomes a real constraint significant enough to reconsider the tradeoff
+even with the dialect-swap risk understood.
+
+---
+
+## Multi-backend Geiser (`+chez +gambit +guile`) hangs the whole daemon on ambiguous `.scm` files — root-caused, fix designed, not yet built
+
+**Date:** 2026-07-26
+**Status:** Active — blocks Step 11.8 completion
+
+**Problem, confirmed live:** running the full `smoketest.bats` suite
+inside the built `systems-ide` image hung indefinitely on the
+pre-existing test `"opening a .scm file activates scheme-mode"`
+(`smoketest.bats:530`, not one of this session's own additions).
+Confirmed the *entire Emacs daemon* was wedged, not just that one
+`emacsclient` call: a trivial, unrelated `emacsclient --eval '(+ 1 1)'`
+against the same daemon also hung and had to be killed with
+`timeout`. Root-caused by reading `emacsmirror/geiser`'s own source
+(`geiser-impl.el`, `geiser-mode.el`) rather than guessing:
+
+- `geiser-impl--guess` has a fast path — *"if only one Geiser backend
+  is active, just use it, no guessing needed"* — which is exactly why
+  this worked fine with `+guile` alone (this project's state before
+  today). With three backends active, that shortcut no longer applies.
+- Failing every other guess step (buffer-local var, each backend's own
+  `check-buffer` content heuristic, filename-pattern match,
+  `geiser-default-implementation` — unset, `nil`), `geiser-mode.el`
+  line 382 unconditionally calls
+  `(geiser-impl--set-buffer-implementation nil t)` — that `t` is the
+  `prompt` argument, meaning it drops into an interactive
+  `completing-read` ("Scheme implementation: "). Under `emacsclient
+  --eval` there is no frame/TTY to read from, so the call blocks
+  forever — and because Emacs's core is single-threaded, every other
+  pending request queues behind it, which is why an unrelated `(+ 1
+  1)` hung too.
+- **Gerbil is confirmed unaffected.** `geiser-mode--maybe-activate`
+  (the function hooked onto `scheme-mode-hook`, where Geiser attaches)
+  guards with `(eq major-mode 'scheme-mode)` — an *exact* match, not
+  `derived-mode-p`-aware. Even though `gerbil-mode` is
+  `define-derived-mode`d from `scheme-mode` (so `scheme-mode-hook`
+  itself *does* run in `gerbil-mode` buffers, per Emacs's own
+  parent-hook-chaining), `major-mode` in a Gerbil buffer is literally
+  the symbol `gerbil-mode`, not `scheme-mode`, so this specific guard
+  never activates Geiser there at all. Confirmed from source, not
+  inferred by analogy with Doom's own `+eval-repl-handler-alist`
+  (which has the same exact-`eq`-not-derived shape, documented
+  earlier in this file, but is a separate mechanism).
+
+**Extension-based disambiguation doesn't solve this, confirmed per
+backend:** Chez's own `geiser-chez.el` registers `.ss`/`.def` as its
+distinguishing extensions (`geiser-implementation-extension`) — but
+`.ss` is already exclusively claimed by this project's own
+`gerbil-mode` `auto-mode-alist` entry, and neither plain `scheme-mode`
+nor Gambit's/Guile's own geiser backends register `.ss` anywhere, so a
+`.ss` file never reaches plain `scheme-mode` to begin with in this
+project — Chez's own extension registration is effectively
+unreachable here. Gambit and Guile register *no* distinguishing
+extension at all (confirmed absent from `geiser-gambit.el`/
+`geiser-guile.el`) — both rely purely on `.scm`, genuinely ambiguous
+between the two by filename alone.
+
+**Content-based disambiguation exists already, but asymmetrically —
+confirmed per backend's own source:**
+- Gambit's `check-buffer` method (`geiser-gambit--guess`) matches
+  literal `"gsi"`/`"gambit"` anywhere in the buffer, or any of its own
+  `##`-prefixed primitives (`##debug-repl`, `##import`,
+  `##symbol-table`, `##decompile`, `define-macro`) — a real, cheap
+  (`save-excursion` + single bounded `re-search-forward` from
+  `point-min`), already-working heuristic.
+- Guile's `check-buffer` method (`geiser-guile--guess`) matches its
+  own module form (`define-module`/`use-modules`) or a `#!.../guile`
+  shebang — same cost profile, already working.
+- **Chez has no `check-buffer` method at all** — confirmed by its
+  total absence from `geiser-chez.el` (Gambit's and Guile's each have
+  one; Chez's file has none). It is the actual weak link: with no
+  filename signal reachable and no content signal implemented, any
+  Chez file with no other disambiguating marker always falls through
+  to the hang/prompt.
+
+**Decision — fix design (not yet implemented, next session's
+starting point):**
+1. **Author a `check-buffer` heuristic for Chez ourselves**, mirroring
+   Gambit's/Guile's own cost profile exactly (bounded regex scan from
+   `point-min`, nothing more expensive), hooked in via `after!
+   geiser-chez` by directly pushing a `(check-buffer FUNC)` entry onto
+   `geiser-chez`'s existing methods list in `geiser-impl--registry`
+   (confirmed this is additive and safe — `geiser-impl--method` does
+   `(cadr (assq method (geiser-impl--methods impl)))`, an `assq`
+   lookup, so pushing a new `check-buffer` entry onto the front of the
+   existing list shadows cleanly without needing to touch or
+   re-register anything else Chez's own pinned package already sets
+   up). Candidate markers, confirmed real via GitHub code search
+   against `cisco/ChezScheme` itself rather than assumed: the
+   `(chezscheme)` library name (as in `(import (chezscheme))`,
+   Chez-specific — 14 real hits in Chez's own source) and Chez's own
+   `#!eof`/`#!bwp`-style special reader syntax (24 and 18 real hits
+   respectively) — both essentially unique to Chez among the three.
+   Exact regex still to be finalized when this is actually built.
+2. **Project/directory-tree persistence: use Emacs's own
+   `.dir-locals.el`, not a new mechanism.** `geiser-scheme-implementation`
+   is already a buffer-local variable Geiser's own guess sequence
+   checks *first* (right after an already-resolved cached value, via
+   `hack-local-variables`, per `geiser-impl--guess`), and it's already
+   marked `(put 'geiser-scheme-implementation 'safe-local-variable
+   #'symbolp)` — meaning `.dir-locals.el` (or a file-local variable)
+   already Just Works for this the moment one is written, no new
+   config-reading code needed on our end at all. Writing one
+   programmatically is Emacs's own built-in `add-dir-local-variable`.
+3. **Fallback stays the existing interactive prompt** for genuinely
+   undetectable files (no shebang, no implementation-specific form) —
+   but wrap the moment the user answers it with an offer (`y-or-n-p`)
+   to persist that choice via `add-dir-local-variable` for
+   `scheme-mode` at the current directory (and everything under it,
+   which is exactly how `.dir-locals.el` already scopes on its own),
+   so the same project never asks twice.
+
+**Why this design over the two originally-offered alternatives** (a
+hard `geiser-default-implementation` of `'guile`, or leaving the
+prompt as the only resolution path): a single global default would
+silently mis-resolve any ambiguous Chez or Gambit file with no
+distinguishing content as Guile; the auto-detection-plus-`.dir-locals`
+combination above resolves the common cases automatically (anything
+using Gambit/Guile idioms already works via their existing
+`check-buffer` methods; Chez gets the same treatment once built) and
+only prompts for genuinely neutral files, while making that prompt a
+one-time cost per project rather than a recurring one.
+
+**Not yet done:** the Chez `check-buffer` addition, the persistence
+helper (prompt → `add-dir-local-variable`), and re-running the full
+`smoketest.bats` suite to confirm the hang is actually resolved. Step
+11.8 cannot be marked complete until this lands and the suite runs
+clean end-to-end — this is the concrete next-session starting point.
+
+---
+
+## Multi-backend Scheme elisp will ship as its own git repo/Doom package, not a Docker "scheme image"
+
+**Date:** 2026-07-26
+**Status:** Active — direction decided, nothing built or moved yet
+
+**Context:** the custom elisp this project is about to author to make
+Chez/Gambit/Guile coexist cleanly (the Chez `check-buffer` heuristic
+and `.dir-locals.el` persistence helper from the entry above), plus
+the Gerbil-specific glue already written (`gerbil-config.el`,
+`gerbil-keybindings.el`), all exist for a reason bigger than just this
+image: the same multi-Scheme wiring will be needed again, unchanged,
+by the standalone Lisp IDE planned for later. The question raised was
+whether to package this as a new Docker "scheme image" (`COPY
+--from=`, same shape as `chez-source`/`gambit-source`/`gerbil-source`)
+so both IDEs can pull it identically.
+
+**Decision:** package it as its own dedicated git repository instead,
+consumed via Doom's own `package!` + `:recipe (:host github ...)` +
+`:pin`, not a Docker image.
+
+**Rationale:** every Docker "source image" in this project
+(`nix-source`, `guix-source`, `chez-source`, `gambit-source`,
+`gerbil-source`) exists specifically to distribute *compiled
+toolchains/binaries* via `COPY --from=` — that's the one job they do.
+Elisp already has its own, more natural distribution mechanism in
+active use in this very project: `gerbil-mode.el` itself is pulled
+via `(package! gerbil-mode :recipe (:host github :repo
+"mighty-gerbils/gerbil" :files ("etc/gerbil-mode.el")) :pin
+"...")` — straight.el's `:files`/`:pin` already give per-file
+selection and commit-level versioning that a Docker image has no
+equivalent for. Introducing a second, Docker-based mechanism just for
+this one bit of elisp would be an inconsistent, heavier way to
+distribute a handful of `.el` files when the existing package-based
+path already does the job and is already proven in this exact
+codebase.
+
+**Not yet done:** no new repository exists yet, and no code has moved.
+The Chez `check-buffer`/`.dir-locals.el` work from the entry above
+should be authored directly into this new dedicated repo when it's
+actually built, rather than into `systems-ide`'s own local files
+first and migrated later. Exact repo name and scope (just the
+Chez/Gambit/Guile disambiguation logic, or `gerbil-config.el`/
+`gerbil-keybindings.el` too) still to be decided at that point, per
+this project's own convention of discussing a new module's name and
+purpose before creating it.
+
+---
+
+## Gerbil remains a gerbil-mode/cmuscheme integration; isolate inherited Geiser keys at the mode boundary
+
+**Date:** 2026-08-05
+**Status:** Active — automated verification complete; final rebuilt-GUI evaluation still required
+
+**Context:** a live GUI freeze previously labeled "Chez/Gerbil" produced
+a pure Geiser backtrace even though `.ss` is exclusively Gerbil here and
+`geiser-mode--maybe-activate` rejects derived modes. Re-investigation
+confirmed the active buffer was `hello.ss` in `gerbil-mode`, with
+`geiser-mode` nil. Doom's direct localleader map on `scheme-mode-map`
+was inherited through `gerbil-mode-map`, so `SPC m e d` invoked Geiser
+without activating Geiser mode.
+
+**Decision:** keep Gerbil outside Geiser and shadow the complete inherited
+`SPC m e ...` subtree in `gerbil-mode-map` with gerbil-mode/cmuscheme
+commands. Preserve exact-mode Geiser activation with a
+`+geiser--activate-mode-h` wrapper that calls `geiser-mode` only for
+literal `scheme-mode`. Do not make Gerbil a Geiser backend merely to
+solve a keymap inheritance bug.
+
+**Rationale:** Gerbil is not supported by Geiser, and upstream
+gerbil-mode already owns its process model through `gxi` and cmuscheme.
+The failing path bypassed both Geiser's activation guard and Doom's
+exact-major-mode eval-handler dispatch; correcting the inherited
+bindings fixes the actual boundary. Directly adding `geiser-mode` to
+`scheme-mode-hook` would instead activate Geiser in every derived mode.
+
+**Verification:** rebuilt aarch64 image, full smoke suite 114/114, and
+fresh rebuilt-GUI inspection confirm `gerbil-mode`, `geiser-mode` nil,
+and `SPC m e d` -> `scheme-send-definition`. Manual gxi evaluation in
+the rebuilt GUI remains the final completion gate.
+
+---
+
+## Gerbil completion uses existing Scheme vocabulary plus dabbrev; no fake semantic integration
+
+**Date:** 2026-08-05
+**Status:** Active — scope explicitly accepted
+
+**Context:** pinned and current-master `gerbil-mode.el` have no CAPF,
+Company backend, Geiser backend, or LSP support. Doom consequently
+enabled Company in Gerbil buffers but had no provider capable of useful
+candidates. Buffer-only dabbrev helped local names but not language
+forms; a prototype built from global `scheme-indent-function` symbol
+properties was rejected because its contents depended on unrelated
+loaded packages and load order.
+
+**Decision:** reuse Company's installed `scheme-mode` keyword vocabulary
+for `gerbil-mode`, add only Gerbil's real `package:` top-level
+declaration, and group `company-keywords` with
+`company-dabbrev-code`. Keep CAPF and snippets in the backend chain,
+and lower the dabbrev candidate-length floor buffer-locally to 3.
+
+**Rationale:** this provides better editor assistance while remaining
+DRY and decoupled: no duplicated Scheme catalog, new package, gxi
+process requirement, global symbol scan, or pretense that keywords equal
+semantic completion. A complete solution belongs upstream in
+gerbil-mode (or in a future Geiser-Gerbil backend), not in an expanding
+Doom-local keyword imitation. The accepted ceiling is visible: stock
+Company's Scheme vocabulary omits valid Gerbil forms such as `define`;
+local/project definitions are still covered by dabbrev.
+
+**Alternatives rejected:** forking the Gerbil monorepo solely for
+completion was disproportionate at this stage; copying upstream
+font-lock and indentation lists into Docker config would duplicate and
+drift; parsing those implementation details or scanning global symbol
+properties would be load-order-coupled; advertising LSP/Geiser support
+that does not exist would be incorrect.
+
+---
+
+## Smoke tests and interactive GUI sessions run in separate containers
+
+**Date:** 2026-08-05
+**Status:** Active
+
+**Decision:** never execute `smoketest.bats` inside a `run.sh` GUI
+container. Run the suite through `./run.sh -t` in its own disposable
+container, then launch a separate `./run.sh -f gerbil` container for GUI
+functional testing.
+
+**Rationale:** the smoke harness manages an Emacs daemon as test state.
+Running it inside the interactive container terminated the GUI's PID 1;
+because `run.sh` uses `--rm`, the whole container vanished. Docker events
+confirmed this exact ordering twice. Separating the lifecycles prevents
+the test harness from destroying the system under interactive test and
+preserves genuine crash evidence.

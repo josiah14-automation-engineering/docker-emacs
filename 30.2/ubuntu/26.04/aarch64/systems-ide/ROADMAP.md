@@ -590,59 +590,145 @@ container.
 
 ## Step 11.6: Crystal
 
-No GitHub issue yet. Comes after Racket + Rash.
+No GitHub issue yet. Was skipped over once already (Haskell and Step
+11.8's Chez/Gambit/Gerbil went first) — now researched in depth. Most
+of the previous version's open caveats are resolved below with live
+sources; two real go/no-go decisions remain.
 
-**Two real caveats to weigh before starting, not glossed over:**
-- `crystalline` (the only actively-maintained Crystal LSP server) is
-  explicitly documented as unable to provide full-featured language
-  server capabilities "due to the nature of the Crystal language and the
-  way the compiler works" -- a compiler-architecture limitation, not
-  just an immature-ecosystem one. Verify live (open a real `.cr` file,
-  check what actually works -- completions, go-to-def, hover) before
-  assuming this is "done" the way Rust/Go's LSP support is.
-- Verify Doom's own `:lang crystal` module (referenced in Doom's
-  v21.12-era docs) is still present and functional in the exact Doom
-  commit this project currently pins -- unconfirmed as of this writing.
-  If it's gone or broken, `crystal-mode.el` (crystal-lang-tools,
-  ruby-mode-derived) + manual LSP client registration is the fallback,
-  same shape as this file's TOML/Nushell steps below.
+**Doom module support (confirmed against `modules/lang/crystal/
+{packages,config}.el` at the pinned commit
+`4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57`):** a `:lang crystal` module
+*does* exist and is current (the previous note's "unconfirmed, may be
+gone" was overly cautious). `crystal` alone installs `crystal-mode`
+(MELPA) and `inf-crystal` (both pinned commits) plus, since this
+project's `:checkers syntax` has no `-flymake`, `flycheck-crystal` and
+`flycheck-ameba` (an additional Crystal-specific linter, `ameba` —
+not previously noted, needs its own apt/shards install check). A
+`+lsp` sub-flag exists (`(add-hook 'crystal-mode-local-vars-hook
+#'lsp! 'append)`), same shape as this project's `(go +lsp)`/`(rust
++lsp)` entries — and `lsp-mode` itself already ships a built-in
+`clients/lsp-crystal.el` registering `crystalline --stdio`, so no
+project-authored LSP client registration is needed the way TOML's
+was, unlike this section's previous assumption. Independent of LSP,
+`crystal-mode` also wires its own non-LSP lookup
+(`crystal-def-jump`/`crystal-tool-imp`, via Crystal's own `crystal
+tool implementations`/`context` commands) and formatter (`crystal
+tool format`, via `set-formatter!` — works automatically with this
+project's existing `(format +onsave)` flag, no config needed). The
+module's own `config.el` already binds `SPC m t {a,v,s,t}` (spec
+runners) under localleader. **Net effect: likely needs zero
+project-authored elisp for the mode/formatter/spec-runner story** —
+same shape Nim (Step 15) turned out to have. The `inf-crystal`/REPL
+debugging piece still needs its own config either way (see Debugger
+below).
 
-**Dockerfile:**
-- Crystal is not in Ubuntu's default repos -- needs its own apt source
-  added (check crystal-lang.org's own install instructions for the
-  current recommended method) or the official install script, pinned.
-  Crystal 1.20.2 (current as of this writing) ships official ARM64
-  Linux builds -- confirm this covers the aarch64/M2 target specifically
-  before assuming parity with the x86_64 port is free.
-- Install `crystalline` (check its own distribution method -- `shards
-  build` from source vs. prebuilt release binaries, unconfirmed)
-- Install `icr`/`ic` (Interactive Console for Crystal -- what
-  `inf-crystal.el` connects to, and what actually implements Crystal's
-  "crystal pry" REPL-debugging functionality)
+**Packaging — crystal itself (confirmed live via `docker run
+ubuntu:{26.04,24.04}` + `apt-cache policy`, and against
+`crystal-lang/crystal`'s own GitHub releases):**
+- Not in Ubuntu's default repos on either tree (confirmed: `apt-cache
+  policy crystal` returns nothing at all on both 26.04 and 24.04, not
+  even an unavailable-candidate entry).
+- Current upstream is `1.21.0` (2026-07-16) — this project's official
+  GitHub releases genuinely ship prebuilt Linux **aarch64** *and*
+  x86_64 tarballs (`crystal-1.21.0-1-linux-{aarch64,x86_64}.tar.gz`,
+  plus `-bundled` variants). Confirmed live: the `bin/crystal` inside
+  the aarch64 tarball is a real ELF aarch64 binary, **fully statically
+  linked** (needs nothing at runtime beyond loading itself), and
+  `bin/shards` (Crystal's package manager, matching Nim's `nimble`
+  role) ships in the same tarball — no separate install needed. The
+  `bundled` vs. non-bundled tarballs turned out to have byte-identical
+  `bin/crystal` (same BuildID) in this release, so the distinction
+  doesn't matter for this Dockerfile either way — plain
+  `linux-aarch64.tar.gz`/`linux-x86_64.tar.gz` is sufficient. **No
+  source build needed at all** — unlike Nim (Step 15) or Step 11.8's
+  Chez/Gambit/Gerbil, this is a straightforward prebuilt-binary
+  extraction, the simplest packaging story of any step in this
+  section so far.
+- **Compile-time (not just build-time) runtime deps, confirmed live by
+  actually compiling programs against a bare `ubuntu:26.04` +
+  `crystal` tarball with nothing else installed:** `gcc`, `libc6-dev`,
+  `pkg-config` are required unconditionally (`crystal build` shells
+  out to `cc`/`pkg-config` for every build, confirmed via the exact
+  failure without them). Beyond that, needed dev packages depend on
+  which stdlib features a given program actually uses — confirmed via
+  a real link failure enumerating every missing `-l` flag for a
+  program using `require "big"` + `"yaml"` + `"http/client"`:
+  `zlib1g-dev`, `libssl-dev`, `libyaml-dev`, `libgmp-dev`. **Boehm GC
+  needs no separate package at all** — `libgc.a` ships bundled
+  directly inside the release tarball (`lib/crystal/libgc.a`).
+  **`libevent-dev` is NOT needed** even for `http/client` — contrary
+  to what older Crystal docs (and this project's own Nix-derived
+  `shell.nix` cross-check) implied, this release's linker command had
+  no `-levent` at all, meaning the fiber scheduler doesn't depend on
+  it in this version. `libxml2-dev` (for `require "xml"`) and PCRE
+  (`require "regex"`, if still linked rather than natively bundled)
+  were not exercised in this session's test program — same category
+  as the confirmed ones, worth a quick empirical check at
+  implementation time rather than assuming either way.
 
-**init.el / packages.el:**
-- Try Doom's `:lang crystal` module first (see caveat above). Fallback:
-  `(package! crystal-mode)` + `(package! inf-crystal)`
+**Packaging — crystalline (confirmed via `elbywan/crystalline`'s own
+README and GitHub releases):** not archived, actively pushed
+(2026-05-31), latest tag `v0.18.0` — healthy by activity metrics. The
+documented language-server limitation the previous note quoted is
+real and verbatim: *"Due to the nature of the Crystal language and the
+way the compiler works, it is not possible to provide a full-fledged
+language server with all the features that one would expect."*
+Worth noting plainly (not editorializing): the maintainer's own README
+also reads as fairly burned out on the project ("the fun has been
+sucked out of it") — not a reason to avoid it outright, but a real
+signal about how much to lean on it going forward. **No prebuilt
+aarch64 Linux binary exists at all** (confirmed via the `v0.18.0`
+release's own asset list: only `arm64-apple-darwin`,
+`x86_64-apple-darwin`, and `x86_64-unknown-linux-musl` — no
+`aarch64-unknown-linux-*` of any libc flavor, and the one Linux asset
+that does exist is musl, not glibc). Building from source (`shards
+build crystalline --release ...`) needs the Crystal compiler + shards
+already present (both now free per the section above) — crystalline's
+own README warns this "can take a long time! (several minutes - up to
+20 minutes, depending on your hardware)".
 
-**config.el:**
-- Add `(load! "crystal-keybindings")` (new file)
-- Wire `inf-crystal-minor-mode` onto `crystal-mode-hook` if not already
-  handled by Doom's module
-- No dape/DAP entry needed -- debugging goes through the built-in
-  `debugger` keyword (drops into an interpreted session via Crystal's
-  own interpreter mode, not a compiled-binary debugger) accessed through
-  `inf-crystal`'s REPL buffer, the same shape as Ruby's `binding.pry`
-  through `inf-ruby` -- deliberately lighter-weight than a structured
-  DAP debugger, not a lesser version of one. See DECISIONLOG.md's
-  Ruby/pry entry for the precedent this follows.
+**Packaging — icr (confirmed via `crystal-community/icr`'s own
+README):** real project, matches `inf-crystal-interpreter`'s default
+(`"icr"`, confirmed from `inf-crystal.el`'s own source at
+`brantou/inf-crystal.el`). No prebuilt binaries at all — only a
+`git clone && make && sudo make install` source build, needing
+`libreadline6-dev`(-equivalent)/`libreadline-dev` and "LLVM
+development files" per its own README (unconfirmed exact `llvm-*-dev`
+version needed to match this release's embedded LLVM 20.1.8 — not
+build-tested this session, worth confirming at implementation time).
 
-**Verify:** Open a `.cr` file; confirm major-mode activates and note
-exactly which LSP features actually work given the known crystalline
-limitation above -- don't just confirm "LSP connects." Place a
-`debugger` call in a real script, run it under `inf-crystal`, confirm
-`step`/`next`/`finish`/`continue`/`whereami` all work through the REPL
-buffer. Run `crystal --version` and `crystalline --version` inside the
-container.
+**Go/no-go needed (real decisions, not glossed over):**
+1. **crystalline at all, given it needs a from-source build (several
+   minutes to build, not just download-and-extract) on top of its own
+   documented architectural limitations and the maintainer-burnout
+   signal above** — vs. skipping `+lsp` entirely and relying on
+   `crystal-mode`'s own built-in `crystal-def-jump`/`crystal-tool-imp`
+   non-LSP lookup, which needs nothing beyond the compiler itself.
+   Crystal is the first language in this file where "skip LSP, use the
+   language's own built-in tooling" is a real, not just theoretical,
+   option — worth weighing rather than defaulting to `+lsp` out of
+   habit.
+2. **Debugger approach — this section's previous plan wasn't wrong so
+   much as under-examined:** it assumed `inf-crystal`'s REPL-based
+   `debugger` keyword (Ruby-`binding.pry`-style, via `inf-ruby`'s
+   precedent) was the only real option. That's still available and
+   still simplest. But now confirmed live: `crystal build` has a real
+   `-d`/`--debug` ("Add full symbolic debug info") flag (unlike Nim,
+   where debug info is the *default* — Crystal's isn't), producing a
+   plain native ELF binary — meaning a `+dape-crystal-program`
+   resolver analogous to Nim's/Zig's is *also* technically viable, a
+   real structured-DAP option this section hadn't considered. No
+   bundled `nim-gdb`-style pretty-printer script ships in Crystal's
+   release tarball, so it'd be plain `gdb`/`lldb` with no extra
+   niceties. Decide REPL-only, dape-only, or both, rather than
+   assuming the original REPL-only plan by default.
+
+**Verify:** Open a `.cr` file; confirm major-mode activates, and (if
+`+lsp` is chosen) note exactly which LSP features actually work given
+crystalline's documented limitation — don't just confirm "LSP
+connects." Exercise whichever debugger approach is chosen end-to-end.
+Run `crystal --version`, `shards --version`, and (if installed)
+`crystalline --version` / `icr --version` inside the container.
 
 ---
 
@@ -697,6 +783,18 @@ that decision being revisited first.
 ---
 
 ## Step 11.8: Chez / Gambit / Gerbil (Systems-Programming Schemes)
+
+**OPEN BLOCKER, start here:** all three images/Dockerfile wiring/elisp
+are implemented, but the full `smoketest.bats` run hung the entire
+Emacs daemon (multi-backend Geiser's own interactive-prompt fallback
+blocking under non-interactive `emacsclient`) — root-caused and a fix
+already designed, just not built yet. See DECISIONLOG.md's "Multi-
+backend Geiser (`+chez +gambit +guile`) hangs the whole daemon on
+ambiguous `.scm` files" entry for the full writeup (root cause,
+confirmed Gerbil is unaffected, the `check-buffer`-for-Chez +
+`.dir-locals.el` fix design). Not done until that's built and the bats
+suite runs clean end-to-end, then GUI verification per this section's
+own **Verify** note below.
 
 Continues the Lisp-family, REPL-first track started with Guile and Racket
 (Step 11 / Step 11.5) — these three are the "systems-programming" Schemes
@@ -858,26 +956,95 @@ too.
 
 ## Step 15: Nim
 
-Not yet researched in depth — this is a backlog placeholder, not a
-verified plan; confirm everything below live before writing any
-Dockerfile lines, same standard as every other step in this file.
+Researched (not yet implemented) — the two assumptions in the previous
+version of this section were both wrong; corrected below with live
+sources. One real go/no-go still open before writing any Dockerfile
+lines.
 
-No Doom `:lang nim` module is believed to exist (unconfirmed) — likely
-needs the same project-authored `packages.el`/`nim-config.el` treatment
-as TOML (Step 12), not a Doom module flag. `nim-mode` (MELPA) is the
-likely major mode. `nimlangserver` (nim-lang/langserver) is the actively
-maintained LSP option, installed via `nimble` (Nim's own package
-manager) once the compiler itself is on `PATH` — installed either via
-apt (check staleness first, same as everywhere else in this file) or
-`choosenim` (Nim's official version manager, closer to rustup's role
-for Rust). Debugger: Nim compiles to C then to a native binary, so a
-dape `:program` resolver analogous to `+dape-zig-program` (Step 8) may
-let this reuse gdb/lldb-dap rather than needing new debugger wiring —
-check where `nim c` places its output by default (same-directory,
-source-basename, unless a nimble project structure is in play).
+**Doom module support (confirmed against `modules/lang/nim/{packages,
+config,doctor}.el` at the pinned commit
+`4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57`):** a `:lang nim` module
+*does* exist (the previous note's "believed not to exist" was wrong).
+Plain `nim` (no sub-flags in its `packages.el`) installs `nim-mode`
+(MELPA, pinned commit) and, since this project's `init.el` already has
+`:checkers syntax` with no `-flymake`, `flycheck-nim` too (its
+`packages.el` gates that package behind exactly that
+`(modulep! :checkers syntax -flymake)` check). Completion/definition/
+doc-lookup goes through **`nimsuggest`**, not LSP — Doom wires
+`nimsuggest-mode` directly via `set-lookup-handlers!`
+(`+nimsuggest-find-definition` / `nimsuggest-show-doc`), a custom
+nim-mode↔nimsuggest protocol predating this project's LSP-based
+languages, not `nimlangserver` (the previous note's LSP assumption was
+also wrong — `nimlangserver` isn't referenced anywhere in Doom's own
+nim module). Formatting goes through `nimpretty` via `set-formatter!`,
+which works automatically with this project's existing
+`(format +onsave)` flag — no project-authored config needed for that
+either. The module's own `config.el` already binds `SPC m b`
+(`nim-compile`), `SPC m h` (`nimsuggest-show-doc`), `SPC m d`
+(`nimsuggest-find-definition`) under localleader. **Net effect: this
+may need zero project-authored elisp** — just `(package! ...)`-free,
+flag-free `nim` in the `:lang` block of `init.el`, the same
+zero-extra-elisp shape Guile ended up with. Confirm live rather than
+trusting this outright, same standard as every other step here.
 
-**Verify:** Open a `.nim` file; confirm the major mode and (if wired)
-`nimlangserver` activate. Run `nim --version` inside the container.
+**Packaging (confirmed live via `docker run ubuntu:{26.04,24.04}` +
+`apt-cache policy`):**
+- Ubuntu 26.04 (resolute): apt's `nim` is `2.2.4-2` — and installing
+  it alone pulls in `nim`, `nimble`, `nimpretty`, `nimsuggest`, *and*
+  `nim-gdb` together (confirmed via `dpkg -L nim`), not separate
+  packages. Current upstream is `v2.2.10` (confirmed via
+  `nim-lang/Nim` tags — this repo has no GitHub Releases at all, only
+  tags), so apt here is only patch-versions behind, same 2.2.x minor
+  series.
+- Ubuntu 24.04 (noble): apt's `nim` is `1.6.14-1ubuntu2` — a full
+  major version behind (1.6 vs. 2.2), a much bigger gap than 26.04's.
+- **Go/no-go needed:** accept apt (bundles everything needed in one
+  package, but leaves the two trees on genuinely different Nim major
+  versions unless x86_64 also gets a source build) vs. build from
+  source (gets both trees to the identical current `v2.2.10`, matching
+  Step 11.8's Chez/Gambit precedent, but costs more here — see next
+  paragraph — and 26.04's apt version is close enough that the Chez/
+  Gambit staleness argument is weaker).
+- **Source build is a bigger lift than Chez/Gambit's, confirmed via
+  Nim's own `readme.md`:** the Nim compiler is self-hosted (written in
+  Nim), so building it from source needs bootstrapping from
+  `nim-lang/csources_v3` (a pregenerated C snapshot of an older
+  compiler) first, then Nim's own `koch` build tool for the real
+  target version — a two-stage bootstrap, not a plain
+  configure-and-make like Chez/Gambit's release tarballs. Also worth
+  noting: that same readme's officially-tested Linux architecture list
+  names only x86, x86_64, ppc64, and armv6l — aarch64/arm64 is called
+  out for macOS specifically but not for Linux. Likely just a doc gap
+  (Ubuntu ships an official arm64 build, confirmed installing and
+  running fine above), but worth a sanity check before committing to a
+  source build on this project's aarch64-primary target.
+- `gcc`/`libc6-dev` (or `build-essential`) are required at *runtime*,
+  not just to build Nim itself — confirmed live, `nim c` fails with
+  `gcc: not found` on a bare `nim`-only install, since `nim c` shells
+  out to a real C compiler for every build. Very likely already free
+  in this image (C/C++/Rust steps already need gcc), but confirm it
+  survives into whichever final layer nim ends up in before assuming.
+
+**Debugger (confirmed live, matching the previous note's speculation):**
+default `nim c hello.nim` (no extra flags — it's a debug build unless
+`-d:release` is passed) places a native, debug-symbol-including ELF
+binary at `./hello` — same-directory, source-basename, directly
+`gdb`-debuggable. `nim-gdb` (bundled in the same apt package above) is
+just a wrapper script that launches plain `gdb` with Nim's own
+pretty-printer Python module preloaded
+(`$prefix/lib/nim/tools/debug/nim-gdb.py`, for nicer display of Nim's
+own runtime types — seqs, strings, closures) — not a different
+debugger. A `+dape-nim-program` resolver analogous to
+`+dape-zig-program` (Step 8) — strip the `.nim` extension from the
+buffer's file name — should work with this project's existing dape +
+gdb wiring; optionally loading `nim-gdb.py`'s pretty-printers too is a
+nice-to-have, not required for basic step/breakpoint functionality.
+
+**Verify:** Open a `.nim` file; confirm `nim-mode` + `nimsuggest-mode`
+activate, `nimpretty` formats on save, and (if wired) a `+dape-nim-
+program`-style debug session hits breakpoints correctly. Run
+`nim --version` / `nimble --version` / `nimsuggest --help` inside the
+container.
 
 ---
 
