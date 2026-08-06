@@ -1071,25 +1071,24 @@ check `odin build`'s default output location/naming first.
 
 ## Step 17: SBCL (Common Lisp)
 
-Not yet researched in depth — backlog placeholder, confirm live before
-implementing.
+Researched, confirmed live, no open go/no-go — full plan in
+`COMMON_LISP_INTEGRATION_PLAN.md`. Summary: `:lang common-lisp` is
+fully self-contained at this project's pinned Doom commit
+(`4e0dbb9dc5a3986303295cd7ce5e9faf113c4a57`), same zero-extra-elisp
+shape as Guile — auto-starts Sly on `.lisp` open, eval/repl/lookup/
+formatter handlers all pre-wired, LSP deliberately not integrated
+(Sly replaces it). SBCL via apt (`2:2.6.0-1`) is 7 patch releases
+behind upstream `2.6.7` on the same minor series — fine, no source
+build needed. Quicklisp deliberately skipped (not required for
+baseline functionality, no other Lisp-family step installs an extra
+package manager). No dape wiring, matching every other Lisp-family
+step — SLDB is the debugger. Completes the two-branch Lisp family
+this project has otherwise built entirely out of Scheme (Guile,
+Racket, and Step 11.8's Chez/Gambit/Gerbil) — Common Lisp is the
+other major historical branch, with its own systems-programming
+pedigree (Lisp Machines).
 
-Doom is believed to have a `:lang common-lisp` module (SLY as the
-REPL backend, mirroring Racket/Guile's own REPL-first shape) — this
-needs the same due-diligence check already done for Guile/Racket
-(Step 11 / Step 11.5) before assuming it's fully built out with zero
-extra elisp: confirm against `lang/common-lisp/config.el` at this
-project's pinned Doom commit rather than assuming parity. SBCL itself
-is likely fine via apt (it's GCC-adjacent in how actively Debian/Ubuntu
-track it, unlike the standalone-binary-release tools elsewhere in this
-file) — check staleness anyway, same standard as everywhere else.
-Completes the two-branch Lisp family this project has otherwise built
-entirely out of Scheme (Guile, Racket, and Step 11.8's Chez/Gambit/
-Gerbil) — Common Lisp is the other major historical branch, with its
-own systems-programming pedigree (Lisp Machines).
-
-**Verify:** Open a `.lisp` file; confirm `sly` connects to a running
-SBCL REPL. Run `sbcl --version` inside the container.
+**Verify:** see `COMMON_LISP_INTEGRATION_PLAN.md`'s Verify section.
 
 ---
 

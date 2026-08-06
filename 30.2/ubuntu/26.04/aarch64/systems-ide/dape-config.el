@@ -33,7 +33,8 @@ means invoking the debugger builds first, same as `SPC m b b'."
         (goto-char (point-min))
         (let (program)
           (while (re-search-forward "^{.*}$" nil t)
-            (when-let* ((msg (ignore-errors (json-parse-string (match-string 0) :object-type 'alist)))
+            (when-let* ((msg (ignore-errors
+                               (json-parse-string (match-string 0) :object-type 'alist)))
                         ((equal (alist-get 'reason msg) "compiler-artifact"))
                         (exe (alist-get 'executable msg)))
               (setq program exe)))
@@ -109,20 +110,10 @@ default for anything else (e.g. a bare `cc foo.c')."
       ;; lldb-dap/lldb-vscode are this file's Rust-only adapters (see
       ;; DECISIONLOG.md), not used for assembly.
       (when (eq name 'gdb)
-        (setq config (plist-put config 'modes (append (plist-get config 'modes) '(asm-mode)))))
+        (setq config (plist-put config 'modes
+                                (cons 'asm-mode
+                                      (remove 'asm-mode (plist-get config 'modes))))))
       (setf (alist-get name dape-configs) config)))
-
-  ;; Same gap class as gdb/asm-mode above: neither lldb adapter's built-in
-  ;; `modes' list includes zig-mode. Zig debugging is an lldb job here,
-  ;; not a gdb one -- matching Rust, not Assembly. This is its own dolist
-  ;; over lldb-dap/lldb-vscode only rather than folded into the gdb dolist
-  ;; above, the same shape as the :disableASLR/:stopOnEntry patches below
-  ;; -- each independent lldb-dap/lldb-vscode-only concern in this file
-  ;; gets its own loop rather than accumulating onto an unrelated one.
-  (dolist (name '(lldb-dap lldb-vscode))
-    (when-let* ((config (alist-get name dape-configs)))
-      (setf (alist-get name dape-configs)
-            (plist-put config 'modes (append (plist-get config 'modes) '(zig-mode))))))
 
   ;; dape's own default `command-cwd' (`dape-command-cwd' -> `project-current')
   ;; determines two things, not just one: it's both the adapter process's
@@ -195,11 +186,6 @@ guessing at all."
   ;; settings call reach it in time; this is handled before either runs).
   ;; Setting it false skips the syscall entirely, so no container
   ;; capability/seccomp change is needed at all. See DECISIONLOG.md.
-  (dolist (name '(lldb-dap lldb-vscode))
-    (when-let* ((config (alist-get name dape-configs)))
-      (setf (alist-get name dape-configs)
-            (plist-put config :disableASLR nil))))
-
   ;; dape sends `launch' unconditionally right after `initialize''s
   ;; response, in a separate, unsynchronized code path from
   ;; `setBreakpoints' (which only fires once the adapter sends its own
@@ -215,10 +201,17 @@ guessing at all."
   ;; regardless of breakpoints, giving the late `setBreakpoints' request
   ;; time to land before anything resumes. One extra `SPC d c' is needed
   ;; on every launch to get past that initial stop. See DECISIONLOG.md.
+  ;; Neither lldb adapter includes zig-mode. Keep all shared LLDB overrides
+  ;; together so the two adapter configurations cannot drift apart.
   (dolist (name '(lldb-dap lldb-vscode))
     (when-let* ((config (alist-get name dape-configs)))
-      (setf (alist-get name dape-configs)
-            (plist-put config :stopOnEntry t))))
+      (setq config
+            (plist-put config 'modes
+                       (cons 'zig-mode
+                             (remove 'zig-mode (plist-get config 'modes)))))
+      (setq config (plist-put config :disableASLR nil))
+      (setq config (plist-put config :stopOnEntry t))
+      (setf (alist-get name dape-configs) config)))
 
   ;; dape has no built-in Lua config -- unlike gdb/lldb-dap/dlv/debugpy,
   ;; nothing here is patching an existing entry. `local-lua-debugger-vscode'
@@ -267,7 +260,9 @@ guessing at all."
   (setf (alist-get 'lua-local dape-configs)
         (list 'modes '(lua-mode)
               'command "node"
-              'command-args (list (expand-file-name "~/.local/lib/local-lua-debugger-vscode/extension/debugAdapter.js"))
+              'command-args
+              (list (expand-file-name
+                     "~/.local/lib/local-lua-debugger-vscode/extension/debugAdapter.js"))
               :type "lua-local"
               :request "launch"
               :program (list :lua "lua" :file #'+dape-lua-file)

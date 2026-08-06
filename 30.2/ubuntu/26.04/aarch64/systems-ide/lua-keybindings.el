@@ -13,7 +13,7 @@
 ;;   M-r         evaluate buffer in REPL (+eval/buffer, :tools eval)
 ;;
 ;; Doom's own :lang lua module wires all of the above automatically once
-;; `lua-language-server' is on PATH/configured (see config.el's
+;; `lua-language-server' is on PATH/configured (see lua-config.el's
 ;; lsp-clients-lua-language-server-bin): local-vars-hook attaches LSP,
 ;; `set-repl-handler!' wires the buffer/region eval bindings to a real
 ;; `lua'/`luajit' subprocess, and format-on-save runs stylua via Doom's

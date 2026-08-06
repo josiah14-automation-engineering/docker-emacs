@@ -11,7 +11,7 @@
 ;; commit's modules/lang/ tree -- doomemacs has never shipped one), so
 ;; nothing calls `lsp!' automatically when a .fish buffer opens. Mirror
 ;; Doom's own convention directly, same shape as nu-config.el/asm-config.el.
-(add-hook 'fish-mode-local-vars-hook #'lsp! 'append)
+(add-hook! 'fish-mode-local-vars-hook :append #'lsp!)
 
 ;; Unlike Nushell/Assembly, lsp-mode ships no built-in fish-lsp client at
 ;; all (confirmed -- no clients/lsp-fish.el exists in lsp-mode) -- fish-lsp
@@ -19,7 +19,7 @@
 ;; TOML's own plan calls for. `lsp-stdio-connection' takes the literal
 ;; argv: fish-lsp's own docs invoke it as `fish-lsp start', not a bare
 ;; `fish-lsp' with no subcommand.
-(with-eval-after-load 'lsp-mode
+(after! lsp-mode
   (add-to-list 'lsp-language-id-configuration '(fish-mode . "fish"))
   (lsp-register-client
    (make-lsp-client :new-connection (lsp-stdio-connection '("fish-lsp" "start"))

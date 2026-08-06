@@ -19,7 +19,7 @@
 ;; Doom's own :lang python module wires LSP auto-attach (pyright, since
 ;; this image only installs pyright -- no ty/basedpyright/jedi to create
 ;; ambiguity) and the REPL automatically. Format-on-save runs ruff
-;; (config.el overrides apheleia's own default of black for python-mode).
+;; (python-config.el overrides apheleia's own default of black for python-mode).
 ;;
 ;; pyright does not implement LSP-level document formatting (it's a
 ;; type-checker/language-intelligence server only, not a formatter --

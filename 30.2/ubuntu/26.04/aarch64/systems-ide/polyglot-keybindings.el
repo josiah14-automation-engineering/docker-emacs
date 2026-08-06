@@ -7,8 +7,15 @@
 ;; global-keybindings.el for that) -- cross-cutting development-tooling
 ;; concerns that show up across multiple languages' LSP/project setups.
 ;;
+;; Doom's standard LSP/Flycheck bindings used by language modes:
+;;   g d / g D   definition / references
+;;   K           hover documentation
+;;   ] d / [ d   next / previous diagnostic
+;;   SPC c a/r   code action / rename
+;;   SPC b c     check current buffer
+;;
 ;;   SPC l w S   force lsp-mode's interactive root picker
-;;               (lsp-pick-root)
+;;               (+systems-lsp/pick-root)
 ;;
 ;; `lsp-auto-guess-root' (config.el, needed for the daemon/smoketest
 ;; flow) short-circuits lsp-mode's own interactive root-selection prompt
@@ -40,7 +47,7 @@
 
 ;;; Code:
 
-(defun lsp-pick-root ()
+(defun +systems-lsp/pick-root ()
   "Force lsp-mode's interactive root picker for the current buffer.
 Buffer-locally disables `lsp-auto-guess-root' just long enough to reach
 `lsp--find-root-interactively', then calls `lsp' interactively. Does not
@@ -49,9 +56,9 @@ touch the global `lsp-auto-guess-root' setting."
   (setq-local lsp-auto-guess-root nil)
   (call-interactively #'lsp))
 
-(defun lsp-restore-auto-guess-root ()
+(defun +systems-lsp/restore-auto-guess-root ()
   "Restore automatic root-guessing for the current buffer.
-`lsp-pick-root' disables `lsp-auto-guess-root' buffer-locally so it can
+`+systems-lsp/pick-root' disables `lsp-auto-guess-root' buffer-locally so it can
 reach lsp-mode's interactive root prompt -- there's no other built-in
 way to undo that override for a single buffer once it's set. This
 kills the buffer-local binding entirely, reverting to whatever
@@ -62,7 +69,7 @@ kills the buffer-local binding entirely, reverting to whatever
 (map! :leader
       (:prefix "l"
         (:prefix "w"
-         :desc "Pick root interactively" "S" #'lsp-pick-root)))
+         :desc "Pick root interactively" "S" #'+systems-lsp/pick-root)))
 
 (provide 'polyglot-keybindings)
 ;;; polyglot-keybindings.el ends here

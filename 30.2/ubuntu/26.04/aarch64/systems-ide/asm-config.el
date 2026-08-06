@@ -13,7 +13,7 @@
 ;; so nothing calls `lsp!' automatically when a .s/.asm buffer opens.
 ;; Mirror Doom's own convention directly, same shape as nu-config.el/
 ;; fish-config.el.
-(add-hook 'asm-mode-local-vars-hook #'lsp! 'append)
+(add-hook! 'asm-mode-local-vars-hook :append #'lsp!)
 
 ;; lsp-mode already ships a built-in asm-lsp client (clients/lsp-asm.el),
 ;; but like lsp-nushell before it (nu-config.el), it only auto-loads once

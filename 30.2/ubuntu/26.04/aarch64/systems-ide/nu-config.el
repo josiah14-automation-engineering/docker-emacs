@@ -18,7 +18,7 @@
 ;; With no Doom :lang module for nushell, nothing would call `lsp!'
 ;; automatically when a .nu buffer opens. Mirror Doom's own convention
 ;; directly instead.
-(add-hook 'nushell-ts-mode-local-vars-hook #'lsp! 'append)
+(add-hook! 'nushell-ts-mode-local-vars-hook :append #'lsp!)
 
 ;; lsp-mode's nushell-ls client lives in the separate clients/lsp-nushell.el,
 ;; which -- like clients/lsp-bash.el before it (see bats-config.el) -- only

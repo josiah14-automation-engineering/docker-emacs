@@ -484,7 +484,7 @@ lsp_servers_for() {
   # default (dash) regardless of sh-shell -- silently breaking
   # sh-execute-region (SPC m e e / SPC m e b) on any bash-only syntax for a
   # plain .sh file that only carries a #!/usr/bin/env bash shebang (no
-  # .bash extension to trigger this project's own bash-mode instead).
+  # .bash extension to trigger this project's own Bash selector instead).
   run eval_elisp '(progn (find-file "/tmp/smoketest/test-shebang.sh") (format "%s %s" sh-shell sh-shell-file))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "bash bash" ]]
@@ -677,6 +677,23 @@ lsp_servers_for() {
   [[ "$output" =~ "guile" ]]
 }
 
+@test "reloading scheme-config does not duplicate Geiser methods or advice" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test-chez-auto.scm")
+    (geiser-impl--guess)
+    (load-file "~/.config/doom/scheme-config.el")
+    (load-file "~/.config/doom/scheme-config.el")
+    (list
+     (cl-count (quote check-buffer)
+               (cdr (assq (quote chez) geiser-impl--registry))
+               :key (function car))
+     (and (advice-member-p (function +geiser--remember-implementation-a)
+                           (quote geiser-impl--read-impl))
+          t)))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(1 t)" ]]
+}
+
 @test "flycheck-guile also connects for a content-auto-detected (non-pinned) Guile buffer" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test-guile-auto.scm") (list (bound-and-true-p flycheck-mode) (flycheck-get-checker-for-buffer)))'
   [ "$status" -eq 0 ]
@@ -793,6 +810,20 @@ lsp_servers_for() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (key-binding (kbd "SPC m e d")))'
   [ "$status" -eq 0 ]
   [[ "$output" == "scheme-send-definition" ]]
+}
+
+# The keybinding test above only proves gerbil-keybindings.el's own map
+# shadows the inherited binding -- it would pass even if `geiser-mode'
+# were also active underneath. This test targets the actual root-cause
+# fix instead (scheme-config.el's `+geiser--activate-mode-h'): since
+# `gerbil-mode' derives from `scheme-mode', `scheme-mode-hook' fires for
+# gerbil-mode buffers too (`run-mode-hooks' walks the derived-mode parent
+# chain), so without the `(eq major-mode 'scheme-mode)' guard Geiser
+# would turn itself on there as well.
+@test "geiser-mode does not activate in a gerbil-mode buffer" {
+  run eval_elisp '(progn (find-file "/tmp/smoketest/test.ss") (bound-and-true-p geiser-mode))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "nil" ]]
 }
 
 @test "gerbil completion suggests vocabulary and local symbols" {
@@ -1021,6 +1052,20 @@ lsp_servers_for() {
   [[ "$output" =~ "asm-mode" ]]
 }
 
+@test "reloading dape-config does not duplicate added debugger modes" {
+  run eval_elisp '(progn
+    (require (quote dape))
+    (load-file "~/.config/doom/dape-config.el")
+    (load-file "~/.config/doom/dape-config.el")
+    (list
+     (cl-count (quote asm-mode)
+               (plist-get (alist-get (quote gdb) dape-configs) (quote modes)))
+     (cl-count (quote zig-mode)
+               (plist-get (alist-get (quote lldb-dap) dape-configs) (quote modes)))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(1 1)" ]]
+}
+
 # Uses /tmp/smoketest-nomarkers/, not /tmp/smoketest/asm/ -- confirmed live
 # that /tmp/smoketest/asm/test.s doesn't actually exercise the "zero markers
 # anywhere" case this test means to check: /tmp/smoketest/'s own
@@ -1169,7 +1214,7 @@ lsp_servers_for() {
 @test "nu localleader keybindings resolve (execute region, execute buffer)" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.nu") (list (key-binding (kbd "SPC m e e")) (key-binding (kbd "SPC m e b"))))'
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "(nu-run-region nu-run-buffer)" ]]
+  [[ "$output" =~ "(+nu/run-region +nu/run-buffer)" ]]
 }
 
 @test "c localleader keybindings resolve (format buffer)" {
@@ -1221,6 +1266,13 @@ lsp_servers_for() {
 # top-level /tmp/smoketest/CMakeLists.txt fixture used by the test above.
 @test "+cmake--root climbs a nested CMakeLists.txt to the outermost project root" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/nested-cmake/CMakeLists.txt") (string= (+cmake--root) "/tmp/smoketest/"))'
+  [ "$status" -eq 0 ]
+  [[ "$output" == "t" ]]
+}
+
+@test "+cmake--root refuses to operate outside a CMake project" {
+  run eval_elisp '(let ((default-directory "/tmp/smoketest-nomarkers/"))
+    (condition-case nil (+cmake--root) (user-error t)))'
   [ "$status" -eq 0 ]
   [[ "$output" == "t" ]]
 }
@@ -1366,27 +1418,28 @@ lsp_servers_for() {
 
 # polyglot-keybindings.el: cross-cutting dev-tooling, not language-specific,
 # so placed here rather than under any one language's test group.
-@test "SPC l w S keybinding resolves to lsp-pick-root (polyglot-keybindings.el)" {
+@test "SPC l w S keybinding resolves to +systems-lsp/pick-root" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC l w S")))'
   [ "$status" -eq 0 ]
-  [[ "$output" =~ "lsp-pick-root" ]]
+  [[ "$output" =~ "+systems-lsp/pick-root" ]]
 }
 
-# Doesn't call lsp-pick-root itself -- it ends in (call-interactively #'lsp),
+# Doesn't call +systems-lsp/pick-root itself -- it ends in
+# (call-interactively #'lsp),
 # which reaches lsp-mode's real interactive root-selection prompt with no
 # way to answer it under headless emacsclient (same class of hang the
 # multi-backend Geiser fix elsewhere in this file avoids by never reaching
 # an unanswerable interactive prompt). Exercises the same buffer-local
-# override/restore mechanism directly instead: lsp-restore-auto-guess-root
+# override/restore mechanism directly instead: +systems-lsp/restore-auto-guess-root
 # has no other built-in way to undo a buffer-local lsp-auto-guess-root
 # override, so this confirms it actually kills the local binding rather
 # than just setting it back to a guessed value.
-@test "lsp-restore-auto-guess-root kills the buffer-local lsp-auto-guess-root override" {
+@test "+systems-lsp/restore-auto-guess-root kills the buffer-local override" {
   run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test.c")
     (let ((before lsp-auto-guess-root))
       (setq-local lsp-auto-guess-root nil)
       (let ((during (list lsp-auto-guess-root (local-variable-p (quote lsp-auto-guess-root)))))
-        (lsp-restore-auto-guess-root)
+        (+systems-lsp/restore-auto-guess-root)
         (list before during lsp-auto-guess-root (local-variable-p (quote lsp-auto-guess-root))))))'
   [ "$status" -eq 0 ]
   [[ "$output" == "(t (nil t) t nil)" ]]

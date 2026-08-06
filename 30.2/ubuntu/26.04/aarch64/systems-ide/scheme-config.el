@@ -1,4 +1,4 @@
-;;; scheme-config.el --- Geiser multi-backend (Chez/Gambit/Guile) configuration -*- lexical-binding: t; -*-
+;;; scheme-config.el --- Geiser multi-backend configuration -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
@@ -26,7 +26,7 @@
 (defconst +geiser-chez-guess-re "(chezscheme)\\|#!\\(?:eof\\|bwp\\)"
   "Regexp matching Chez-specific source markers.")
 
-(defun +geiser-chez-check-buffer ()
+(defun +geiser-chez-buffer-p ()
   "Ascertain whether the current buffer holds Chez Scheme code.
 Same cost profile as `geiser-guile--guess': a single bounded
 `re-search-forward' from `point-min', nothing more expensive."
@@ -34,14 +34,17 @@ Same cost profile as `geiser-guile--guess': a single bounded
     (goto-char (point-min))
     (re-search-forward +geiser-chez-guess-re nil t)))
 
+;; HACK: Geiser exposes no public registration API for implementation methods.
 (after! geiser-chez
   ;; `geiser-impl--method' resolves via a plain `assq' over this list
   ;; (`geiser-impl--methods' / `geiser-impl--registry'), so pushing a new
   ;; `check-buffer' entry onto the front of Chez's own methods list
   ;; shadows cleanly -- no need to touch or re-register anything else
   ;; `geiser-chez''s own `define-geiser-implementation' already set up.
-  (push (list 'check-buffer #'+geiser-chez-check-buffer)
-        (cdr (assq 'chez geiser-impl--registry))))
+  (let ((implementation (assq 'chez geiser-impl--registry)))
+    (setcdr implementation
+            (cons (list 'check-buffer #'+geiser-chez-buffer-p)
+                  (assq-delete-all 'check-buffer (cdr implementation))))))
 
 ;; Fix, part 2: once a file genuinely has no detectable marker for any
 ;; of the three, `geiser-impl--guess' still falls through to the
@@ -53,15 +56,19 @@ Same cost profile as `geiser-guile--guess': a single bounded
 ;; after an already-resolved cached value) and is already marked
 ;; `safe-local-variable', so nothing new is needed to make Geiser
 ;; *read* it back -- only this write path.
+(defun +geiser--remember-implementation-a (impl)
+  "Offer to remember the selected Scheme implementation, then return IMPL."
+  (when (and buffer-file-name
+             (y-or-n-p
+              (format "Remember `%s' as this directory's Scheme implementation? " impl)))
+    (add-dir-local-variable 'scheme-mode 'geiser-scheme-implementation impl)
+    (save-buffer))
+  impl)
+
+;; HACK: Geiser has no public hook after interactive implementation selection.
+(advice-remove 'geiser-impl--read-impl #'+geiser--remember-implementation-a)
 (advice-add 'geiser-impl--read-impl :filter-return
-            (lambda (impl)
-              (when (and buffer-file-name
-                         (y-or-n-p
-                          (format "Remember `%s' as this directory's Scheme implementation? "
-                                  impl)))
-                (add-dir-local-variable 'scheme-mode 'geiser-scheme-implementation impl)
-                (save-buffer))
-              impl))
+            #'+geiser--remember-implementation-a)
 
 ;; Fix, part 3: even once an implementation is resolved (marker,
 ;; dir-locals, or answered prompt), `geiser-eval-definition' and the

@@ -1,7 +1,7 @@
 ;;; packages.el -*- lexical-binding: t; -*-
 
 (package! realgud)              ;; for zsh debugging
-(package! nushell-ts-mode)      ;; tree-sitter major mode for .nu files (highlighting, indentation, completion)
+(package! nushell-ts-mode)      ; Tree-sitter mode for highlighting, indentation, completion.
 (package! flycheck-golangci-lint) ;; inline golangci-lint diagnostics in go-mode
 (package! bats-mode)            ;; major mode for editing/running .bats test files
 (package! fish-mode)            ;; major mode for .fish scripts (wwwjfy/emacs-fish)
@@ -22,4 +22,3 @@
   :recipe (:host github :repo "mighty-gerbils/gerbil"
            :files ("etc/gerbil-mode.el"))
   :pin "07c8481588a8b07dbf05832687817cd398902ac0")
-

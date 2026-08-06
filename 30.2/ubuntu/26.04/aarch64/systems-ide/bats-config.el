@@ -42,6 +42,8 @@
 ;; modes. A bats-mode buffer never matches (that's the whole problem this
 ;; file exists to fix), so lsp-bash would never load on its own here.
 ;; Force it explicitly so `gethash' below actually finds the client.
+;; HACK: lsp-mode exposes no public API for extending an existing client's
+;; major modes, so this intentionally depends on its private client structure.
 (after! lsp-mode
   (require 'lsp-bash)
   (cl-pushnew 'bats-mode (cl-struct-slot-value
@@ -56,7 +58,7 @@
 ;; module for bats to wire this up, nothing ever calls `lsp!' automatically
 ;; on a fresh `.bats' buffer; it only worked when called by hand. Mirror
 ;; Doom's own hook exactly, scoped to bats-mode's own local-vars hook.
-(add-hook 'bats-mode-local-vars-hook #'lsp! 'append)
+(add-hook! 'bats-mode-local-vars-hook :append #'lsp!)
 
 (provide 'bats-config)
 ;;; bats-config.el ends here

@@ -16,16 +16,16 @@
 ;; ruby-lsp (Shopify's, the modern/actively-maintained choice -- solargraph
 ;; is not installed in this image, so there's no ambiguity between the
 ;; two) runs as `bundle exec ruby-lsp' against a fixed, pre-built, offline
-;; bundle (`lsp-ruby-lsp-use-bundler' is t in config.el) -- ruby-lsp's own
+;; bundle (`lsp-ruby-lsp-use-bundler' is t in ruby-config.el) -- ruby-lsp's own
 ;; internal bootstrap hard-requires `bundle' regardless of project
 ;; structure, so unlike every other language in this glue-script tier,
 ;; plain no-bundler/no-Gemfile invocation isn't actually an option here;
 ;; see the Dockerfile's BUNDLE_GEMFILE comment for the full story. rubocop
 ;; also registers its own `rubocop --lsp' LSP client (rubocop-ls); it's
-;; disabled in config.el since it only provides diagnostics/formatting,
+;; disabled in ruby-config.el since it only provides diagnostics/formatting,
 ;; not completion, and would otherwise silently win the client-priority
 ;; contest against ruby-lsp-ls.
-;; Format-on-save runs rubocop's own `-a'/autocorrect (config.el overrides
+;; Format-on-save runs rubocop's own `-a'/autocorrect (ruby-config.el overrides
 ;; apheleia's own default of prettier-ruby, an npm-based plugin, for
 ;; ruby-mode) -- one Ruby-native tool doing both linting and formatting,
 ;; no Node dependency pulled in just to format Ruby.

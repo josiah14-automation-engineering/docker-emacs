@@ -35,13 +35,13 @@
 (defun +cmake--root ()
   "Return the outermost ancestor directory containing a CMakeLists.txt.
 Climbs past nested CMakeLists.txt files (e.g. add_subdirectory() targets)
-to the top-level project directory. Falls back to `default-directory' if
-none is found (shouldn't happen from a cmake-mode buffer)."
-  (let ((root default-directory) (search-from default-directory) next)
+to the top-level project directory. Signal a user error outside a CMake
+project so commands cannot operate on an unrelated `build' directory."
+  (let ((search-from default-directory) root next)
     (while (setq next (locate-dominating-file search-from "CMakeLists.txt"))
       (setq root next
             search-from (expand-file-name ".." next)))
-    root))
+    (or root (user-error "No CMakeLists.txt found"))))
 
 (defun +cmake/configure ()
   "Configure the current CMake project into ./build.
