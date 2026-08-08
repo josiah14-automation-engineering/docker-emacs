@@ -11,6 +11,8 @@ SERVICES = ["nginx", "app"]
 
 
 def main() -> None:
+    debug_value = 42
+    print(debug_value)
     print(f"hostname: {tasks.run('hostname')}")
     for service in SERVICES:
         tasks.restart_service(service)

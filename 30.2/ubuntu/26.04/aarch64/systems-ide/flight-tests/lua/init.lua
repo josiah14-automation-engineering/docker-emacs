@@ -1,6 +1,8 @@
 local utils = require("utils")
 
 local hello_str = "hello"
+local debug_value = 42
+print(debug_value)
 
 local options = {
 	number = true,

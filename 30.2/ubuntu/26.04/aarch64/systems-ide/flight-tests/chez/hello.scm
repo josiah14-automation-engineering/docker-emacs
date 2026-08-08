@@ -1,3 +1,5 @@
+(import (chezscheme))
+
 (define (greet name)
   (string-append "Hello from Chez, " name "!"))
 

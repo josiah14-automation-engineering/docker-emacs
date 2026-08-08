@@ -17,6 +17,8 @@ const counter = @import("counter.zig");
 
 pub fn main() void {
     const message = "Hello";
+    const debug_value: i32 = 42;
+    std.debug.print("{d}\n", .{debug_value});
     std.debug.print("{s}\n", .{message});
 
     var c = counter.Counter{ .n = 0, .name = "test" };

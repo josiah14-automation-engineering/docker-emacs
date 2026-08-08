@@ -8,6 +8,8 @@ use counter::Counter;
 
 fn main() {
     let message = "Hello";
+    let debug_value: i32 = 42;
+    println!("{debug_value}");
     println!("{message}");
 
     let mut c = Counter {

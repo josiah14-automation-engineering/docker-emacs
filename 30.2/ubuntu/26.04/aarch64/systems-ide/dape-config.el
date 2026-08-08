@@ -253,6 +253,10 @@ guessing at all."
     "Absolute path to the current buffer's file."
     (buffer-file-name))
 
+  (defun +dape-lua-program ()
+    "Launch arguments for the current Lua buffer."
+    (list :lua "lua" :file (+dape-lua-file)))
+
   (defun +dape-lua-cwd ()
     "Directory containing the current buffer's file."
     (file-name-directory (buffer-file-name)))
@@ -265,7 +269,7 @@ guessing at all."
                      "~/.local/lib/local-lua-debugger-vscode/extension/debugAdapter.js"))
               :type "lua-local"
               :request "launch"
-              :program (list :lua "lua" :file #'+dape-lua-file)
+              :program #'+dape-lua-program
               :cwd #'+dape-lua-cwd
               :extensionPath (expand-file-name "~/.local/lib/local-lua-debugger-vscode"))))
 

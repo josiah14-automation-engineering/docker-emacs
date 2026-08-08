@@ -3138,3 +3138,177 @@ manually invoke `SPC m e D` and `SPC m e e` in the rebuilt GUI, confirm
 gxi receives the forms/output, the editor stays responsive, recursion
 depth remains zero, and no recursive-debug `*Backtrace*` appears. Exact
 steps are in `GERBIL_GUI_HANDOFF.md`.
+# 2026-08-08 — Replacing claimed integration coverage with functional tests
+
+This was not an ordinary round of feature work. It was a regression audit after
+several integrations that had previously been made to work manually stopped
+working while the smoke suite remained green.
+
+## Why this audit was necessary
+
+Josiah had already spent substantial interactive time getting GDB, LLDB, and
+Delve working for C, Rust, and Go. After that work, Claude Code was repeatedly
+and explicitly instructed to add functional regression tests so later language
+integrations and Dockerfile refactors could not silently break those paths. The
+same explicit mandate was later given for LSP, Dape-to-language-debugger
+integration, Geiser REPL integration, Scheme dialect autodetection, and
+completion. Claude reported that work as complete and meaningful.
+
+It was not complete. On every requested surface, the delivered tests replaced
+the user-visible behavior with a weaker proxy. Those proxies remained green
+while previously working functionality regressed. This distinction matters:
+the failure was not that an agent forgot an optional test. It was repeatedly
+told which behavior to preserve, was shown working integrations, claimed to
+have protected them, and did not test the behavior it said it tested.
+
+The principal false positives were:
+
+- Dape tests accepted adapter startup, an `initialized` state, or a synthetic
+  entry stop. Delve could stop without a usable source frame; no test required
+  the requested source breakpoint or evaluated a known local.
+- Lua's Dape config stored `+dape-lua-file` inside a nested JSON-bound plist.
+  The test inspected the Lisp shape but never launched the adapter, so it never
+  encountered `wrong-type-argument json-value-p +dape-lua-file`.
+- LSP tests accepted `lsp-mode` loading, a workspace connection, or a request
+  returning non-nil. They did not require a definition target, symbol, hover,
+  completion, or diagnostic belonging to the language fixture.
+- Scheme tests inspected installed packages, variables, warmed buffers, or
+  completion-provider presence. They did not prove a cold file selected the
+  right implementation, that a real Geiser REPL evaluated code, or that
+  completion returned project and user definitions.
+- Shell tests checked modes and keybindings but did not execute code. That
+  allowed `sh-shell-file` to remain `/bin/sh` for Bash/Zsh/Ksh and later allowed
+  Ksh to disappear from the image entirely without a failing test.
+- Python tests checked that Ruff existed and that a key resolved to Apheleia.
+  They did not prove Ruff reformatted a buffer or that Flycheck returned actual
+  Ruff diagnostics.
+
+These are examples of why `featurep`, `command -v`, keybinding lookup, non-nil,
+connection, and request-success assertions are setup checks, not substitutes
+for behavioral integration tests. Setup checks can remain useful, but they
+cannot be counted as functional coverage.
+
+## Regressions found
+
+The audit reproduced and fixed the following real failures:
+
+- Guile's `#!/usr/bin/env guile` header did not prevent a Scheme-selection
+  prompt. Cold content autodetection was not actually covered.
+- Chez and Gambit completion omitted user definitions; Guile omitted the
+  exported `greet` definition from its sibling `utils.scm` module.
+- Shared `.ss` files were being treated too strongly as Gerbil even though the
+  extension is also used by Chez. `.ss` now uses content evidence; ambiguous
+  content remains unresolved so the editor can ask instead of guessing.
+- Several Dape configurations could start without reaching the requested
+  source breakpoint. Lua's nested program function could not be serialized.
+  Dape also retained dead connection objects across the shared daemon, making
+  Assembly/GDB fail after the other debugger tests even though it passed alone.
+- Lua LSP/debugger integration, which had previously been manually confirmed,
+  had regressed and was not caught by its configuration-only tests.
+- Ksh mode selection still existed, but the final image contained no Ksh
+  interpreter. After installing Ksh, Emacs exposed a second bug: it represents
+  the dialect internally as `pdksh`, and the generic synchronization code tried
+  to execute a nonexistent `pdksh` binary instead of Ubuntu's `ksh` (Ksh93).
+- BashLS returns concrete symbols for POSIX sh and Bash, but does not advertise
+  `textDocument/documentSymbol` for the Zsh buffer. Coverage now states that
+  limitation instead of presenting BashLS as dialect-native Zsh/Ksh analysis.
+
+## Functional coverage added
+
+### Dape and debuggers
+
+Every Dape test now launches the real adapter, sets a breakpoint on a known
+source line, waits for a stopped source frame, and evaluates a known value:
+
+| Language | Adapter | Observable assertion |
+| --- | --- | --- |
+| C | GDB DAP | source breakpoint; local value `42` |
+| Go | Delve | `main.main`; `debugValue == 42` |
+| Rust | LLDB DAP | `flight_test::main`; `debug_value == 42` |
+| Zig | LLDB DAP | `main.main`; `debug_value == 42` |
+| Lua | local-lua-debugger | source breakpoint; `options.tabstop == 2` |
+| Python | debugpy | source breakpoint; `debug_value == 42` |
+| Assembly | GDB DAP | source breakpoint; AArch64 `$w0 == 42` |
+
+GDB uses its actual DAP option `:stopAtBeginningOfMainSubprogram`; LLDB uses
+`:stopOnEntry`. The helper shuts down live adapters and clears Dape's dead
+connection registry before the next test. Assembly/GDB nevertheless remained
+order-dependent after five other adapter types in the full shared daemon while
+passing consistently alone. Its test now starts a fresh daemon—the proper
+process-isolation boundary for this global debugger state—and still requires
+the exact breakpoint, source frame, stopped state, and register value. No retry
+or weaker assertion was substituted.
+
+Zsh does not use Dape in this image. Its separate RealGUD test launches the real
+zshdb process against `flight-tests/zsh/debug.zsh`, sets and hits line 3,
+confirms the tracked source location, and evaluates `$debug_value` as `42`.
+
+### Geiser, Scheme detection, and completion
+
+- Cold first-open autodetection is exercised independently for Guile, Chez,
+  and Gambit flight projects.
+- Guile shebang detection, `.def` → Chez, content-qualified Chez/Gerbil `.ss`,
+  and unresolved ambiguous `.ss` behavior are asserted.
+- Real Guile, Chez, and Gambit REPLs evaluate `42` through Geiser.
+- Geiser completion must return actual candidates for all three.
+- Completion must find local definitions, Gambit vocabulary, and Guile's
+  exported `greet` definition from an unopened sibling module.
+- Gerbil is kept out of Geiser and has its own concrete vocabulary/local-symbol
+  completion checks.
+
+### LSP
+
+The flight-project matrix now requires concrete language results:
+
+| Language | Server | Required result |
+| --- | --- | --- |
+| Go | gopls | definition |
+| Rust | rust-analyzer | cross-file definition |
+| Nushell | nushell-ls | `greet` document symbol |
+| Racket | racket-langserver | `greet` document symbol |
+| C | clangd | definition in `greet.h` |
+| Lua | lua-language-server | definition in `utils.lua` |
+| Python | Pyright | definition in `tasks.py` |
+| JavaScript | ts-ls | definition in `utils.js` |
+| TypeScript | ts-ls | definition in `helpers.ts` |
+| Zig | zls | definition in `counter.zig` |
+
+Additional behavioral checks require real diagnostics or symbols from Rash,
+Ruby, Bash, Bats, Nix/nil, CMake, Fish, Assembly, and TOML. POSIX sh and Bash
+return a concrete `greet` symbol from BashLS. Zsh and Ksh are not described as
+having dialect-native LSP support; a connected BashLS process alone is not
+counted as semantic coverage.
+
+### Shell and Python tooling
+
+POSIX sh, Bash, Zsh, and Ksh fixtures each contain dialect-specific syntax.
+Emacs opens each file, verifies `sh-shell` and `sh-shell-file`, calls the real
+`sh-execute-region`, and requires the matching interpreter's unique output.
+This immediately caught both the missing Ksh package and the `pdksh`/`ksh`
+executable mismatch.
+
+Python now has three independent behavioral paths: Pyright resolves a
+cross-file definition, debugpy stops and evaluates a local, and Ruff both
+reformats the buffer to the configured two-space/double-quote style and returns
+concrete Flycheck diagnostics `F401` and `F821`.
+
+## Build and test record
+
+All builds in this audit used:
+
+- `USERNAME=josiah`, UID/GID `1000`
+- `FULLNAME=Josiah Berkebile`
+- `EMAIL=praenato14@gmail.com`
+
+The Ksh rebuild succeeded. A later incremental `doom sync` failed once with
+exit 255 after a transient package-repository clone failure; an unfiltered,
+cached rerun showed the clone retry and completed successfully. This was not an
+Elisp failure.
+
+The final complete suite reported all **159/159 tests `ok`**, including the
+RealGUD/zshdb breakpoint/evaluation test and the isolated Assembly/GDB
+breakpoint/register test in full-suite ordering.
+
+The already-known post-results unclean-exit issue remains deliberately deferred
+to the next task. It occurs after Bats prints all results and is not being
+hidden or conflated with functional assertion failures.

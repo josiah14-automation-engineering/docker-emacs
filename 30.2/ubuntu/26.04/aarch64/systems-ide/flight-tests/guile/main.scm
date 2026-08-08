@@ -1,3 +1,6 @@
+#!/usr/bin/env guile
+!#
+
 (add-to-load-path (dirname (current-filename)))
 (use-modules (utils))
 

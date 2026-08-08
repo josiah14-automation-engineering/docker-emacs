@@ -49,7 +49,7 @@ that auto-detection can't dialect-guess."
 ;; `${var:-default}', etc.).
 (defun +shell--sync-shell-file ()
   "Set buffer-local `sh-shell-file' to match the already-detected `sh-shell'."
-  (setq-local sh-shell-file (symbol-name sh-shell)))
+  (setq-local sh-shell-file (if (eq sh-shell 'pdksh) "ksh" (symbol-name sh-shell))))
 
 (add-hook! 'sh-mode-hook #'+shell--sync-shell-file)
 

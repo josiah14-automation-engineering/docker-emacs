@@ -33,9 +33,18 @@
 
 setup_file() {
   mkdir -p /tmp/smoketest
+  cp -a "$(dirname "$BATS_TEST_FILENAME")/flight-tests" /tmp/flight-tests
   cat > /tmp/smoketest/test.bash <<'EOF'
 #!/bin/bash
-echo hi
+items=(wrong BASH_OK)
+printf '%s\n' "${items[1]}"
+greet() { echo hi; }
+EOF
+  cat > /tmp/smoketest/test.sh <<'EOF'
+#!/bin/sh
+value=SH_OK
+printf '%s\n' "$value"
+greet() { echo hi; }
 EOF
   cat > /tmp/smoketest/test-shebang.sh <<'EOF'
 #!/usr/bin/env bash
@@ -46,6 +55,15 @@ print("hi")
 EOF
   cat > /tmp/smoketest/test.py <<'EOF'
 print("hi")
+EOF
+  cat > /tmp/smoketest/test-python-format.py <<'EOF'
+def greet():
+    return 'hi'
+EOF
+  cat > /tmp/smoketest/test-python-lint.py <<'EOF'
+import os
+
+print(undefined_name)
 EOF
   cat > /tmp/smoketest/test.rb <<'EOF'
 puts "hi"
@@ -59,7 +77,15 @@ console.log(message);
 EOF
   cat > /tmp/smoketest/test.zsh <<'EOF'
 #!/bin/zsh
-echo hi
+items=(wrong ZSH_OK)
+printf '%s\n' "${items[2]}"
+greet() { echo hi; }
+EOF
+  cat > /tmp/smoketest/test.ksh <<'EOF'
+#!/bin/ksh
+typeset -A values=([result]=KSH_OK)
+printf '%s\n' "${values[result]}"
+greet() { echo hi; }
 EOF
   cat > /tmp/smoketest/test.go <<'EOF'
 package main
@@ -74,7 +100,7 @@ fn main() {
 }
 EOF
   cat > /tmp/smoketest/test.nix <<'EOF'
-{ }
+{ answer = 42; }
 EOF
   cat > /tmp/smoketest/test.nu <<'EOF'
 def main [] {
@@ -92,6 +118,19 @@ EOF
 (display "hi")
 (newline)
 EOF
+  cat > /tmp/smoketest/test-chez-extension.def <<'EOF'
+(define answer 42)
+EOF
+  cat > /tmp/smoketest/test-chez-content.ss <<'EOF'
+(import (chezscheme))
+(define answer 42)
+EOF
+  cat > /tmp/smoketest/test-gerbil-content.ss <<'EOF'
+(def answer 42)
+EOF
+  cat > /tmp/smoketest/test-ambiguous.ss <<'EOF'
+(define answer 42)
+EOF
   cat > /tmp/smoketest/test-gambit-auto.scm <<'EOF'
 ;; Example Gambit Scheme program (gsi)
 (display "hi")
@@ -102,6 +141,10 @@ EOF
 !#
 (display "hi")
 (newline)
+EOF
+  cat > /tmp/smoketest/test.el <<'EOF'
+(defun smoketest-greeting ()
+  (message "hi"))
 EOF
   cat > /tmp/smoketest/test.rkt <<'EOF'
 #lang racket
@@ -142,7 +185,10 @@ EOF
 int main() { return 0; }
 EOF
   cat > /tmp/smoketest/test.fish <<'EOF'
-echo "hi"
+function greet
+  echo "hi"
+end
+greet
 EOF
   cat > /tmp/smoketest/test.pl <<'EOF'
 print "hi\n";
@@ -202,7 +248,8 @@ EOF
   cat > /tmp/smoketest/asm/test.s <<'EOF'
 .global main
 main:
-    mov w0, #0
+    mov w0, #42
+    mov w1, w0
     ret
 EOF
   # Separate top-level root, not just a subdirectory of /tmp/smoketest/ --
@@ -217,7 +264,8 @@ EOF
   cat > /tmp/smoketest-nomarkers/test.s <<'EOF'
 .global main
 main:
-    mov w0, #0
+    mov w0, #42
+    mov w1, w0
     ret
 EOF
   cat > /tmp/smoketest/CMakeLists.txt <<'EOF'
@@ -240,6 +288,10 @@ EOF
 }
 EOF
   gcc -g -O0 /tmp/smoketest/test.c -o /tmp/smoketest/test-c-debug
+  start_emacs_daemon
+}
+
+start_emacs_daemon() {
   emacs --daemon > /tmp/smoketest/daemon.log 2>&1 &
   for _ in $(seq 1 60); do
     emacsclient --eval 1 >/dev/null 2>&1 && return
@@ -251,7 +303,8 @@ EOF
 }
 
 teardown_file() {
-  emacsclient --eval '(kill-emacs)' >/dev/null 2>&1 || true
+  timeout 5 emacsclient --eval '(kill-emacs)' >/dev/null 2>&1 || true
+  pkill -TERM emacs >/dev/null 2>&1 || true
 }
 
 eval_elisp() {
@@ -265,6 +318,137 @@ lsp_servers_for() {
       (while (and (< (float-time) deadline) (not (lsp-workspaces)))
         (sleep-for 0.5)))
     (mapcar #'lsp--workspace-server-id (lsp-workspaces)))"
+}
+
+lsp_protocol_request_for() {
+  eval_elisp "(progn
+    (find-file \"$1\")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (let ((servers (mapcar #'lsp--workspace-server-id (lsp-workspaces))))
+      (condition-case error
+          (let ((response
+                 (lsp-request
+                  \"$2\"
+                  (if (string= \"$2\" \"textDocument/documentSymbol\")
+                      (list :textDocument (lsp--text-document-identifier))
+                    (lsp--text-document-position-params)))))
+            (list servers (not (null response))))
+        (error (list servers nil (error-message-string error))))))"
+}
+
+lsp_result_for() {
+  eval_elisp "(progn
+    (find-file \"$1\")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline)
+                  (not (lsp--capability-for-method \"$2\")))
+        (sleep-for 0.2)))
+    (sleep-for 1)
+    (goto-char (point-max))
+    (unless (string= \"$3\" \"-\") (search-backward \"$3\"))
+    (let (response last-error)
+      (dotimes (_ 5)
+        (unless response
+          (condition-case error
+              (setq response
+                    (lsp-request
+                     \"$2\"
+                     (if (string= \"$2\" \"textDocument/documentSymbol\")
+                         (list :textDocument (lsp--text-document-identifier))
+                       (lsp--text-document-position-params))))
+            (error (setq last-error error) (sleep-for 1)))))
+      (if response
+          (list (mapcar #'lsp--workspace-server-id (lsp-workspaces)) response)
+        (signal (car last-error) (cdr last-error)))))"
+}
+
+dape_launch_for() {
+  eval_elisp "(progn
+    (require 'dape)
+    (dolist (connection (copy-sequence dape--connections))
+      (when (jsonrpc-running-p connection) (dape--shutdown connection)))
+    (setq dape--connections nil)
+    (find-file \"$1\")
+    (dape-breakpoint-remove-all)
+    (goto-char (point-min))
+    (search-forward \"$5\")
+    (beginning-of-line)
+    (let ((target-line (line-number-at-pos)))
+      (dape-breakpoint-toggle)
+    (let ((options (list 'command-cwd \"$4\")))
+      (when (eq '$2 'gdb)
+        (setq options (plist-put options :stopAtBeginningOfMainSubprogram t)))
+      (when (memq '$2 '(lldb-dap lldb-vscode))
+        (setq options (plist-put options :stopOnEntry t)))
+      (unless (string-empty-p \"$3\")
+        (setq options (plist-put options :program \"$3\")))
+      (dape (dape--config-eval '$2 options)))
+    (let ((deadline (+ (float-time) 40)) conn frame result error)
+      (while (and (< (float-time) deadline)
+                  (not (setq conn (dape--live-connection 'stopped t))))
+        (sleep-for 0.2))
+      (when (and conn (memq '$2 '(gdb lldb-dap lldb-vscode)))
+        (dape-continue conn)
+        (sleep-for 0.5)
+        (while (and (< (float-time) deadline)
+                    (not (eq (dape--state conn) 'stopped)))
+          (sleep-for 0.1)))
+      (when conn
+        (let (thread request-error)
+          (while (and (< (float-time) deadline)
+                      (not (setq thread
+                                 (seq-find
+                                  (lambda (item)
+                                    (eq (plist-get item :status) 'stopped))
+                                  (dape--threads conn)))))
+            (sleep-for 0.2))
+          (when thread
+            (let ((dape--request-blocking t))
+              (dape--stack-trace
+               conn thread 1
+               (lambda (_result callback-error)
+                 (setq request-error callback-error))))
+            (setq error request-error
+                  frame (car (plist-get thread :stackFrames))))))
+      (when frame
+        (let ((dape--request-blocking t))
+          (dape--evaluate-expression
+           conn (plist-get frame :id) \"$6\" \"watch\"
+           (lambda (body request-error)
+             (setq result (plist-get body :result)
+                   error request-error)))))
+      (let* ((session (or conn (car dape--connections)))
+             (state (and session (dape--state session)))
+             (reason (and session (dape--state-reason session))))
+        (when session (dape--shutdown session))
+        (list (and frame (= target-line (plist-get frame :line)))
+              (plist-get frame :name) result error state reason)))))"
+}
+
+completion_contains_for() {
+  eval_elisp "(progn
+    (find-file \"$1\")
+    (when (not (string-empty-p \"$2\"))
+      (save-window-excursion
+        (geiser-repl-switch nil (intern \"$2\") (current-buffer))))
+    (goto-char (point-max))
+    (insert \"\n($3\")
+    (let ((capf (catch 'found
+                  (dolist (fn completion-at-point-functions)
+                    (when (functionp fn)
+                      (let ((result (funcall fn)))
+                        (when result (throw 'found result))))))))
+      (and capf
+           (not (null
+                 (member \"$4\"
+                         (all-completions
+                          (buffer-substring-no-properties (nth 0 capf) (nth 1 capf))
+                          (nth 2 capf))))))))"
 }
 
 @test "bash-language-server is installed and reports a version" {
@@ -283,6 +467,48 @@ lsp_servers_for() {
   [ "$status" -eq 0 ]
 }
 
+@test "RealGUD/zshdb hits a source breakpoint and evaluates a variable" {
+  run eval_elisp '(progn
+    (realgud:zshdb "zshdb /tmp/flight-tests/zsh/debug.zsh")
+    (let ((deadline (+ (float-time) 20)) process buffer)
+      (while (and (< (float-time) deadline)
+                  (not (setq process
+                             (seq-find
+                              (lambda (candidate)
+                                (member "zshdb" (process-command candidate)))
+                              (process-list)))))
+        (sleep-for 0.2))
+      (setq buffer (and process (process-buffer process)))
+      (while (and process (< (float-time) deadline)
+                  (not (with-current-buffer buffer
+                         (string-match-p "zshdb<0>" (buffer-string)))))
+        (accept-process-output process 0.2))
+      (process-send-string process "break 3\n")
+      (process-send-string process "continue\n")
+      (process-send-string process "print $debug_value\n")
+      (while (and (< (float-time) deadline)
+                  (not (with-current-buffer buffer
+                         (string-match-p "zshdb<3>" (buffer-string)))))
+        (accept-process-output process 0.2))
+      (prog1
+          (with-current-buffer buffer
+            (list (bound-and-true-p zshdb-track-mode)
+                  (string-match-p "Breakpoint 1 hit" (buffer-string))
+                  (string-match-p "debug.zsh:3" (buffer-string))
+                  (string-match-p "42\r?\n" (buffer-string))))
+        (when (process-live-p process) (delete-process process)))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^\(t\ [0-9]+\ [0-9]+\ [0-9]+\)$ ]]
+}
+
+@test "sh, bash, zsh, and ksh interpreters are installed" {
+  for shell in sh bash zsh ksh; do
+    run command -v "$shell"
+    [ "$status" -eq 0 ]
+  done
+}
+
 @test "go is installed and reports the pinned version (1.26.3)" {
   run go version
   [ "$status" -eq 0 ]
@@ -293,6 +519,13 @@ lsp_servers_for() {
   run gopls version
   [ "$status" -eq 0 ]
   [[ "$output" =~ "v0.22.0" ]]
+}
+
+@test "Doom's environment exposes final-stage toolchains" {
+  run eval_elisp '(mapcar (lambda (program) (cons program (executable-find program)))
+                          (quote ("go" "gopls" "scheme" "gsi" "cargo" "racket" "zig")))'
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ " nil)" ]]
 }
 
 @test "dlv is installed and reports the pinned version (1.26.3)" {
@@ -497,6 +730,37 @@ lsp_servers_for() {
   [[ "$output" =~ "zsh" ]]
 }
 
+@test "POSIX sh, Bash, Zsh, and Ksh execute through their detected interpreters" {
+  while read -r file dialect interpreter expected; do
+    run eval_elisp "(progn
+      (find-file \"/tmp/smoketest/$file\")
+      (when (get-buffer \"*Shell Command Output*\")
+        (kill-buffer \"*Shell Command Output*\"))
+      (sh-execute-region (point-min) (point-max))
+      (list sh-shell sh-shell-file
+            (with-current-buffer \"*Shell Command Output*\"
+              (string-trim (buffer-string)))))"
+    echo "$file: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "($dialect \"$interpreter\" \"$expected\")" ]]
+  done <<'EOF'
+test.sh sh sh SH_OK
+test.bash bash bash BASH_OK
+test.zsh zsh zsh ZSH_OK
+test.ksh pdksh ksh KSH_OK
+EOF
+}
+
+@test "BashLS returns real symbols for supported POSIX sh and Bash buffers" {
+  for file in test.sh test.bash; do
+    run lsp_result_for "/tmp/smoketest/$file" textDocument/documentSymbol -
+    echo "$file: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "bash-ls" ]]
+    [[ "$output" =~ "greet" ]]
+  done
+}
+
 # featurep, not bound-and-true-p: (lsp-deferred) is an autoloaded stub, so
 # calling it from the mode hook forces lsp-mode.el to load synchronously even
 # though the actual server handshake is scheduled for the next idle moment.
@@ -595,15 +859,74 @@ lsp_servers_for() {
   [[ "$output" =~ "Guile" ]]
 }
 
+@test "a cold first Scheme open autodetects each flight project from contents" {
+  run eval_elisp '(mapcar
+    (lambda (file)
+      (with-current-buffer (find-file-noselect file)
+        (list major-mode (geiser-impl--guess))))
+    (quote ("/tmp/flight-tests/guile/main.scm"
+            "/tmp/flight-tests/chez/hello.scm"
+            "/tmp/flight-tests/gambit/hello.scm")))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "((scheme-mode guile) (scheme-mode chez) (scheme-mode gambit))" ]]
+}
+
 @test "opening a .scm file activates scheme-mode" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.scm") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "scheme-mode" ]]
 }
 
+@test "Geiser autodetects Chez from its precise .def extension" {
+  run eval_elisp '(mapcar
+    (lambda (file)
+      (with-current-buffer (find-file-noselect file)
+        (list major-mode (geiser-impl--guess))))
+    (quote ("/tmp/smoketest/test-chez-extension.def")))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "((scheme-mode chez))" ]]
+}
+
+@test "a shared .ss file with Chez content selects Chez" {
+  run timeout 10 emacsclient --eval '(with-current-buffer
+    (find-file-noselect "/tmp/smoketest/test-chez-content.ss")
+    (list major-mode (geiser-impl--guess)))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(scheme-mode chez)" ]]
+}
+
+@test "a shared .ss file with Gerbil content selects Gerbil" {
+  run timeout 10 emacsclient --eval '(with-current-buffer
+    (find-file-noselect "/tmp/smoketest/test-gerbil-content.ss")
+    major-mode)'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "gerbil-mode" ]]
+}
+
+@test "a shared .ss file with ambiguous content remains unresolved" {
+  run eval_elisp '(with-temp-buffer
+    (insert-file-contents "/tmp/smoketest/test-ambiguous.ss")
+    (list (+geiser-chez-buffer-p)
+          (+geiser-gambit-buffer-p)
+          (geiser-guile--guess)
+          (seq-some
+           (lambda (entry)
+             (and (eq (caar entry) (quote regexp))
+                  (string-match-p "\\\\.ss" (cadar entry))
+                  (cadr entry)))
+           geiser-implementations-alist)))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "(nil nil nil nil)" ]]
+}
+
 @test "Geiser activates and evaluates through the Guile REPL" {
   run eval_elisp '(progn
-    (find-file "/tmp/smoketest/test.scm")
+    (find-file "/tmp/flight-tests/guile/main.scm")
     (let ((source (current-buffer)))
       (save-window-excursion (geiser-repl-switch nil (quote guile) source))
       (with-current-buffer source
@@ -615,6 +938,108 @@ lsp_servers_for() {
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(t" ]]
   [[ "$output" =~ "42" ]]
+}
+
+@test "Geiser evaluates through the Chez REPL" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/chez/hello.scm")
+    (let ((source (current-buffer)))
+      (save-window-excursion (geiser-repl-switch nil (quote chez) source))
+      (with-current-buffer source
+        (goto-char (point-max))
+        (let ((start (point)))
+          (insert "\n(+ 20 22)")
+          (geiser-eval-region/wait start (point) 20)))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "42" ]]
+}
+
+@test "Geiser evaluates through the Gambit REPL" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/gambit/hello.scm")
+    (let ((source (current-buffer)))
+      (save-window-excursion (geiser-repl-switch nil (quote gambit) source))
+      (with-current-buffer source
+        (goto-char (point-max))
+        (let ((start (point)))
+          (insert "\n(+ 20 22)")
+          (geiser-eval-region/wait start (point) 20)))))'
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "42" ]]
+}
+
+@test "Geiser completion returns suggestions for Guile, Chez, and Gambit" {
+  while read -r file implementation; do
+    run completion_contains_for "/tmp/flight-tests/$file" "$implementation" displ display
+    echo "$file: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "t" ]]
+  done <<'EOF'
+guile/main.scm guile
+chez/hello.scm chez
+gambit/hello.scm gambit
+EOF
+}
+
+@test "Guile completion finds an exported definition in an unopened sibling module" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/guile/main.scm")
+    (not (null (member "greet"
+                       (+scheme-company-project-symbols (quote candidates) "gr")))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "t" ]]
+}
+
+@test "Scheme completion includes user-defined symbols from flight buffers" {
+  while read -r file prefix candidate; do
+    run eval_elisp "(progn
+      (find-file \"/tmp/flight-tests/$file\")
+      (list
+       (member 'company-dabbrev-code (flatten-tree company-backends))
+       (member \"$candidate\"
+               (company-dabbrev-code 'candidates \"$prefix\"))))"
+    echo "$file: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "company-dabbrev-code" ]]
+    [[ "$output" =~ "$candidate" ]]
+  done <<'EOF'
+chez/hello.scm gr greet
+chez/hello.scm jos josiah-greet
+gambit/hello.scm gr greet
+guile/utils.scm gr greet
+EOF
+}
+
+@test "Gambit Company suggestions combine vocabulary and local definitions" {
+  while read -r prefix candidate; do
+    run eval_elisp "(progn
+      (find-file \"/tmp/flight-tests/gambit/hello.scm\")
+      (goto-char (point-max))
+      (insert \"\n($prefix\")
+      (let ((company-backend
+             (seq-find
+              (lambda (backend)
+                (and (listp backend)
+                     (memq 'company-dabbrev-code backend)))
+              company-backends)))
+        (not (null (member \"$candidate\"
+                           (company-call-backend 'candidates))))))"
+    echo "$prefix -> $candidate: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "t" ]]
+  done <<'EOF'
+def define
+dis display
+gr greet
+EOF
+}
+
+@test "Emacs Lisp completion returns native suggestions" {
+  run completion_contains_for /tmp/smoketest/test.el "" mes message
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "t" ]]
 }
 
 @test "flycheck-guile connects for scheme-mode buffers ((scheme +guile))" {
@@ -1033,6 +1458,79 @@ lsp_servers_for() {
   [[ "$output" =~ "nil)" ]]
 }
 
+@test "Dape/Delve hits a Go breakpoint and evaluates a local" {
+  run go build -gcflags=all=-N\ -l -o /tmp/flight-tests/go/flight-test \
+    /tmp/flight-tests/go/flight-test.go
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run dape_launch_for /tmp/flight-tests/go/flight-test.go dlv "" \
+    /tmp/flight-tests/go/ "fmt.Println(debugValue)" debugValue
+  echo "Go/Delve: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ '(t "main.main" "42" nil stopped "breakpoint")' ]]
+}
+
+@test "Dape/LLDB hits a Rust breakpoint and evaluates a local" {
+  run cargo build --manifest-path /tmp/flight-tests/rust/Cargo.toml
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run dape_launch_for /tmp/flight-tests/rust/src/main.rs lldb-dap \
+    /tmp/flight-tests/rust/target/debug/flight-test /tmp/flight-tests/rust/ \
+    'println!(\"{debug_value}\")' debug_value
+  echo "Rust/LLDB: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ '(t "flight_test::main" "42" nil stopped "breakpoint")' ]]
+}
+
+@test "Dape/LLDB hits a Zig breakpoint and evaluates a local" {
+  run zig build --build-file /tmp/flight-tests/zig/build.zig \
+    --cache-dir /tmp/flight-tests/zig/.zig-cache \
+    --global-cache-dir /tmp/flight-tests/zig/.zig-global-cache \
+    --prefix /tmp/flight-tests/zig/zig-out
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run dape_launch_for /tmp/flight-tests/zig/src/main.zig lldb-dap \
+    /tmp/flight-tests/zig/zig-out/bin/flight-test /tmp/flight-tests/zig/ \
+    'std.debug.print(\"{d}\\n\", .{debug_value})' debug_value
+  echo "Zig/LLDB: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ '(t "main.main" "42" nil stopped "breakpoint")' ]]
+}
+
+@test "Dape/local-lua-debugger hits a Lua breakpoint and evaluates a local" {
+  run dape_launch_for /tmp/flight-tests/lua/init.lua lua-local "" \
+    /tmp/flight-tests/lua/ "for name, value" options.tabstop
+  echo "Lua/local-lua-debugger: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ '(t' ]]
+  [[ "$output" =~ '"2" nil stopped "breakpoint")' ]]
+}
+
+@test "Dape/debugpy hits a Python breakpoint and evaluates a local" {
+  run dape_launch_for /tmp/flight-tests/python/deploy.py debugpy \
+    /tmp/flight-tests/python/deploy.py /tmp/flight-tests/python/ \
+    "print(debug_value)" debug_value
+  echo "Python/debugpy: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ '(t' ]]
+  [[ "$output" =~ '"42" nil stopped "breakpoint")' ]]
+}
+
+@test "Dape/GDB hits an Assembly breakpoint and evaluates a register" {
+  timeout 5 emacsclient --eval '(kill-emacs)' >/dev/null 2>&1 || true
+  pkill -TERM emacs >/dev/null 2>&1 || true
+  start_emacs_daemon
+  run gcc -g /tmp/smoketest-nomarkers/test.s -o /tmp/smoketest-nomarkers/a.out
+  echo "$output"
+  [ "$status" -eq 0 ]
+  run dape_launch_for /tmp/smoketest-nomarkers/test.s gdb \
+    /tmp/smoketest-nomarkers/a.out /tmp/smoketest-nomarkers/ "mov w1, w0" '$w0'
+  echo "Assembly/GDB: $output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ '(t' ]]
+  [[ "$output" =~ '"42" nil stopped "breakpoint")' ]]
+}
+
 # Regression test for a real bug: dape's own built-in gdb config never
 # listed asm-mode (only c-mode/c++-mode/hare-mode variants), and
 # +dape-resolve-cwd's fallback (dape-command-cwd) resolved to the
@@ -1133,15 +1631,18 @@ lsp_servers_for() {
 # itself -- normally injected by VS Code's extension host).
 @test "dape's lua-local debug config wires local-lua-debugger-vscode correctly" {
   run eval_elisp '(progn (require (quote dape))
-    (let ((config (alist-get (quote lua-local) dape-configs)))
+    (find-file "/tmp/flight-tests/lua/init.lua")
+    (let* ((config (alist-get (quote lua-local) dape-configs))
+           (program (funcall (plist-get config :program))))
       (list (plist-get config (quote modes))
             (plist-get config :type)
-            (functionp (plist-get (plist-get config :program) :file))
+            (equal (plist-get program :lua) "lua")
+            (string= (plist-get program :file) (buffer-file-name))
             (stringp (plist-get config :extensionPath)))))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(lua-mode)" ]]
   [[ "$output" =~ "lua-local" ]]
-  [[ "$output" =~ "t t)" ]]
+  [[ "$output" =~ "t t t)" ]]
 }
 
 # +dape-lua-file/+dape-lua-cwd deliberately use buffer-file-name directly
@@ -1251,6 +1752,44 @@ lsp_servers_for() {
   run eval_elisp '(progn (require (quote apheleia)) (list (alist-get (quote python-mode) apheleia-mode-alist) (alist-get (quote ruby-mode) apheleia-mode-alist)))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "(ruff rubocop)" ]]
+}
+
+@test "Python Ruff formatter actually applies the configured style" {
+  run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test-python-format.py")
+    (require (quote apheleia))
+    (let ((done nil))
+      (apheleia-format-buffer
+       (alist-get major-mode apheleia-mode-alist)
+       (lambda (&rest _) (setq done t)))
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (not done) (< (float-time) deadline))
+          (sleep-for 0.2)))
+      (list done
+            (string-match-p "^  return \"hi\"$" (buffer-string))
+            (string-match-p "^    return" (buffer-string)))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^\(t\ [0-9]+\ nil\)$ ]]
+}
+
+@test "Flycheck runs Ruff and reports concrete Python diagnostics" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test-python-lint.py")
+    (flycheck-select-checker (quote python-ruff))
+    (flycheck-buffer)
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline)
+                  (not (memq flycheck-last-status-change (quote (finished errored)))))
+        (sleep-for 0.2)))
+    (list flycheck-checker flycheck-last-status-change
+          (sort (delq nil (mapcar (lambda (error) (flycheck-error-id error))
+                                  flycheck-current-errors))
+                (function string-lessp))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "python-ruff finished" ]]
+  [[ "$output" =~ "F401" ]]
+  [[ "$output" =~ "F821" ]]
 }
 
 @test "cmake localleader keybindings resolve (configure, build, rebuild, clean)" {
@@ -1422,6 +1961,85 @@ lsp_servers_for() {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC l w S")))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "+systems-lsp/pick-root" ]]
+}
+
+@test "every LSP-backed flight project returns a concrete language result" {
+  while read -r file server method needle expected; do
+    run lsp_result_for "/tmp/flight-tests/$file" "$method" "$needle"
+    echo "$file: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "$server" ]]
+    [[ "$output" =~ "$expected" ]]
+  done <<'EOF'
+go/flight-test.go gopls textDocument/definition Counter{ flight-test.go
+rust/src/main.rs rust-analyzer textDocument/definition Counter counter.rs
+nu/toy.nu nushell-ls textDocument/documentSymbol - greet
+racket/hello.rkt racket-langserver textDocument/documentSymbol - greet
+c/src/main.c clangd textDocument/definition make_greeting( greet.h
+lua/init.lua lua-language-server textDocument/definition greet utils.lua
+python/deploy.py pyright textDocument/definition tasks.run tasks.py
+javascript/script.js ts-ls textDocument/definition utils.run utils.js
+typescript/deploy.ts ts-ls textDocument/definition checkPackage helpers.ts
+zig/src/main.zig zls textDocument/definition counter.Counter counter.zig
+EOF
+}
+
+@test "Racket LSP publishes diagnostics for a real Rash syntax error" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/racket/hello-rash.rkt")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (goto-char (point-max))
+    (insert "\n(define broken (")
+    (save-buffer)
+    (let ((deadline (+ (float-time) 20)) diagnostics)
+      (while (and (< (float-time) deadline)
+                  (not (setq diagnostics
+                             (gethash (buffer-file-name) (lsp-diagnostics t)))))
+        (sleep-for 0.5))
+      (length diagnostics)))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[1-9][0-9]*$ ]]
+}
+
+@test "every remaining LSP-backed language returns a concrete language result" {
+  while read -r file server method needle expected; do
+    run lsp_result_for "$file" "$method" "$needle"
+    echo "$file: $output"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "$server" ]]
+    [[ "$output" =~ "$expected" ]]
+  done <<'EOF'
+/tmp/smoketest/test.bash bash-ls textDocument/documentSymbol - greet
+/tmp/smoketest/test.bats bash-ls textDocument/documentSymbol - addition
+/tmp/smoketest/test.nix nix-nil textDocument/documentSymbol - answer
+/tmp/smoketest/CMakeLists.txt cmakels textDocument/hover project project
+/tmp/smoketest/test.fish fish-lsp textDocument/documentSymbol - greet
+/tmp/smoketest/asm/test.s asm-lsp textDocument/documentSymbol - main
+/tmp/smoketest/test.toml taplo textDocument/documentSymbol - package
+EOF
+}
+
+@test "Ruby LSP publishes diagnostics for a real syntax error" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/ruby/deploy.rb")
+    (let ((deadline (+ (float-time) 20)))
+      (while (and (< (float-time) deadline) (not (lsp-workspaces)))
+        (sleep-for 0.5)))
+    (goto-char (point-max))
+    (insert "\ndef broken(\n")
+    (save-buffer)
+    (let ((deadline (+ (float-time) 20)) diagnostics)
+      (while (and (< (float-time) deadline)
+                  (not (setq diagnostics
+                             (gethash (buffer-file-name) (lsp-diagnostics t)))))
+        (sleep-for 0.5))
+      (length diagnostics)))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^[1-9][0-9]*$ ]]
 }
 
 # Doesn't call +systems-lsp/pick-root itself -- it ends in

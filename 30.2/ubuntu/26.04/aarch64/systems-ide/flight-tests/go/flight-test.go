@@ -7,6 +7,8 @@ import (
 
 func main() {
 	var message string = "Hello"
+	debugValue := 42
+	fmt.Println(debugValue)
 	fmt.Println(message)
 	c := Counter{
 		n: 0,
