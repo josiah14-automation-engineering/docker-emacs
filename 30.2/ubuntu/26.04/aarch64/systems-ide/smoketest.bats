@@ -378,8 +378,11 @@ dape_launch_for() {
     (goto-char (point-min))
     (search-forward \"$5\")
     (beginning-of-line)
-    (let ((target-line (line-number-at-pos)))
-      (dape-breakpoint-toggle)
+    (let ((target-line (line-number-at-pos))
+          (source-buffer (current-buffer)))
+      (when (or (not (memq '$2 '(gdb lldb-dap lldb-vscode)))
+                (string-empty-p \"$7\"))
+        (dape-breakpoint-toggle))
     (let ((options (list 'command-cwd \"$4\")))
       (when (eq '$2 'gdb)
         (setq options (plist-put options :stopAtBeginningOfMainSubprogram t)))
@@ -393,28 +396,59 @@ dape_launch_for() {
                   (not (setq conn (dape--live-connection 'stopped t))))
         (sleep-for 0.2))
       (when (and conn (memq '$2 '(gdb lldb-dap lldb-vscode)))
-        (dape-continue conn)
-        (sleep-for 0.5)
-        (while (and (< (float-time) deadline)
-                    (not (eq (dape--state conn) 'stopped)))
-          (sleep-for 0.1)))
-      (when conn
-        (let (thread request-error)
+        (if (not (string-empty-p \"$7\"))
+          (progn
+          (let ((dape--request-blocking t))
+            (dape-breakpoint-function \"$7\"))
+          (unless (plist-get (dape--breakpoint-verified (car dape--breakpoints)) conn)
+            (error \"Function breakpoint was not verified\"))
+          (dape-continue conn)
+          (setq deadline (+ (float-time) 20))
           (while (and (< (float-time) deadline)
-                      (not (setq thread
-                                 (seq-find
-                                  (lambda (item)
-                                    (eq (plist-get item :status) 'stopped))
-                                  (dape--threads conn)))))
-            (sleep-for 0.2))
-          (when thread
+                      (eq (dape--state conn) 'stopped))
+            (sleep-for 0.1))
+          (while (and (< (float-time) deadline)
+                      (not (eq (dape--state conn) 'stopped)))
+            (sleep-for 0.1))
+          (dotimes (_ (string-to-number \"$8\"))
+            (dape-next conn)
+            (setq deadline (+ (float-time) 20))
+            (sleep-for 0.2)
+            (while (and (< (float-time) deadline)
+                        (not (eq (dape--state conn) 'stopped)))
+              (sleep-for 0.1))))
+          (let ((breakpoint (with-current-buffer source-buffer
+                              (car (dape--breakpoints-at-point)))))
+            (unless breakpoint
+              (error \"Source breakpoint was not created\"))
+            (setq deadline (+ (float-time) 20))
+            (while (and (< (float-time) deadline)
+                        (not (plist-get (dape--breakpoint-verified breakpoint) conn)))
+              (sleep-for 0.1)))
+          (dape-continue conn)
+          (setq deadline (+ (float-time) 20))
+          (while (and (< (float-time) deadline)
+                      (eq (dape--state conn) 'stopped))
+            (sleep-for 0.1))
+          (while (and (< (float-time) deadline)
+                      (not (eq (dape--state conn) 'stopped)))
+            (sleep-for 0.1))))
+      (when conn
+        (let (thread-id request-error)
+          (let ((dape--request-blocking t))
+            (dape--update-threads
+             conn (lambda (_result error) (setq request-error error))))
+          (setq thread-id
+                (or (dape--thread-id conn)
+                    (plist-get (car (dape--threads conn)) :id)))
+          (when thread-id
             (let ((dape--request-blocking t))
-              (dape--stack-trace
-               conn thread 1
-               (lambda (_result callback-error)
-                 (setq request-error callback-error))))
-            (setq error request-error
-                  frame (car (plist-get thread :stackFrames))))))
+              (dape-request
+               conn :stackTrace (list :threadId thread-id :startFrame 0 :levels 1)
+               (lambda (body callback-error)
+                 (setq request-error callback-error
+                       frame (car (append (plist-get body :stackFrames) nil))))))
+            (setq error request-error))))
       (when frame
         (let ((dape--request-blocking t))
           (dape--evaluate-expression
@@ -426,7 +460,11 @@ dape_launch_for() {
              (state (and session (dape--state session)))
              (reason (and session (dape--state-reason session))))
         (when session (dape--shutdown session))
-        (list (and frame (= target-line (plist-get frame :line)))
+        (list (and frame
+                   (if (string-empty-p \"$7\")
+                       (= target-line (plist-get frame :line))
+                     (and (string= (plist-get frame :name) \"$7\")
+                          (> (plist-get frame :line) 0))))
               (plist-get frame :name) result error state reason)))))"
 }
 
@@ -771,6 +809,31 @@ EOF
   [[ "$output" =~ "bash-ls" ]]
 }
 
+@test "opening Zsh and Ksh does not attempt an unsupported LSP server" {
+  run eval_elisp '(let (results)
+    (dolist (file (quote ("/tmp/flight-tests/zsh/debug.zsh"
+                          "/tmp/smoketest/test.ksh")))
+      (when-let ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (let (messages)
+        (cl-letf (((symbol-function (quote message))
+                   (lambda (format-string &rest args)
+                     (push (apply (function format) format-string args) messages))))
+          (find-file file)
+          (sleep-for 1))
+        (push (list sh-shell
+                    (bound-and-true-p lsp-mode)
+                    (and (seq-some
+                          (lambda (text)
+                            (string-match-p "no language server" (downcase text)))
+                          messages)
+                         t))
+              results)))
+    (nreverse results))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '((zsh nil nil) (pdksh nil nil))' ]]
+}
+
 @test "opening a .go file activates go-mode" {
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.go") (symbol-name major-mode))'
   [ "$status" -eq 0 ]
@@ -833,6 +896,31 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" =~ "bats-mode" ]]
   [[ "$output" =~ "bash" ]]
+}
+
+@test "Cucumber feature files activate functional Gherkin editing support" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/cucumber/editor.feature")
+    (font-lock-ensure)
+    (goto-char (point-min))
+    (re-search-forward "^Feature:")
+    (let ((feature-face (get-text-property (match-beginning 0) (quote face))))
+      (search-forward "Then")
+      (beginning-of-line)
+      (delete-horizontal-space)
+      (indent-according-to-mode)
+      (list major-mode
+            (substring-no-properties (feature-detect-language))
+            (current-indentation)
+            (and feature-face t)
+            (mapcar (function commandp)
+                    (list (key-binding (kbd "C-c ,s"))
+                          (key-binding (kbd "C-c ,v"))
+                          (key-binding (kbd "C-c ,f"))
+                          (key-binding (kbd "C-c ,g")))))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(feature-mode "en" 4 t (t t t t))' ]]
 }
 
 @test "bash-ls connects for bats-mode buffers" {
@@ -922,6 +1010,49 @@ EOF
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == "(nil nil nil nil)" ]]
+}
+
+@test "opening a detected Scheme file automatically starts its Geiser REPL" {
+  run eval_elisp '(progn
+    (require (quote geiser-repl))
+    (dolist (repl (copy-sequence geiser-repl--repls))
+      (when-let ((process (get-buffer-process repl))) (delete-process process))
+      (when (buffer-live-p repl) (kill-buffer repl)))
+    (setq geiser-repl--repls nil)
+    (mapcar
+     (lambda (case)
+       (let* ((file (car case))
+              (expected (cdr case))
+              (existing (get-file-buffer file)))
+         (when existing (kill-buffer existing))
+         (with-current-buffer (find-file-noselect file)
+           (let ((deadline (+ (float-time) 20)))
+             (while (and (< (float-time) deadline)
+                         (not (geiser-repl--live-p)))
+               (accept-process-output nil 0.2)))
+           (list (geiser-impl--guess)
+                 (and (geiser-repl--live-p) t)
+                 (and (buffer-live-p geiser-repl--repl)
+                      (with-current-buffer geiser-repl--repl
+                        geiser-impl--implementation))))))
+     (quote (("/tmp/flight-tests/chez/hello.scm" . chez)
+             ("/tmp/flight-tests/gambit/hello.scm" . gambit)
+             ("/tmp/flight-tests/guile/main.scm" . guile)))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "((chez t chez) (gambit t gambit) (guile t guile))" ]]
+}
+
+@test "detected Scheme buffers display their dialect in the mode line" {
+  run eval_elisp '(mapcar
+    (lambda (file)
+      (with-current-buffer (find-file-noselect file) mode-name))
+    (quote ("/tmp/flight-tests/chez/hello.scm"
+            "/tmp/flight-tests/gambit/hello.scm"
+            "/tmp/flight-tests/guile/main.scm")))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '("Chez Scheme" "Gambit Scheme" "Guile Scheme")' ]]
 }
 
 @test "Geiser activates and evaluates through the Guile REPL" {
@@ -1251,13 +1382,26 @@ EOF
   [[ "$output" == "nil" ]]
 }
 
-@test "gerbil completion suggests vocabulary and local symbols" {
+@test "Gerbil Company completion returns Scheme syntax, Gerbil forms, and local definitions" {
   run eval_elisp '(progn
-    (find-file "/tmp/smoketest/test.ss")
-    (list (not (null (member "package:" (company-keywords (quote candidates) "pa"))))
-          (not (null (member "greet" (company-dabbrev-code (quote candidates) "gr"))))))'
+    (find-file "/tmp/flight-tests/gerbil/hello.ss")
+    (let ((results (list major-mode)))
+      (dolist (case (quote (("de" "define") ("la" "lambda")
+                            ("se" "set!") ("pa" "package:")
+                            ("de" "def") ("gr" "greet"))))
+        (goto-char (point-max))
+        (let ((start (point)))
+          (insert "\n(" (car case))
+          (company-manual-begin)
+          (setq results
+                (append results
+                        (list (and (member (cadr case) company-candidates) t))))
+          (company-abort)
+          (delete-region start (point-max))))
+      results))'
+  echo "$output"
   [ "$status" -eq 0 ]
-  [[ "$output" == '(t t)' ]]
+  [[ "$output" == '(gerbil-mode t t t t t t)' ]]
 }
 
 @test "opening a .c file activates c-mode" {
@@ -1470,27 +1614,21 @@ EOF
   [[ "$output" =~ '(t "main.main" "42" nil stopped "breakpoint")' ]]
 }
 
-@test "Dape/LLDB hits a Rust breakpoint and evaluates a local" {
+@test "Dape/LLDB hits Rust main, steps source, and evaluates a local" {
   run cargo build --manifest-path /tmp/flight-tests/rust/Cargo.toml
   echo "$output"
   [ "$status" -eq 0 ]
   run dape_launch_for /tmp/flight-tests/rust/src/main.rs lldb-dap \
     /tmp/flight-tests/rust/target/debug/flight-test /tmp/flight-tests/rust/ \
-    'println!(\"{debug_value}\")' debug_value
+    'println!(\"{debug_value}\")' debug_value flight_test::main 3
   echo "Rust/LLDB: $output"
   [ "$status" -eq 0 ]
-  [[ "$output" =~ '(t "flight_test::main" "42" nil stopped "breakpoint")' ]]
+  [[ "$output" =~ '(t "flight_test::main" "42" nil stopped "step")' ]]
 }
 
 @test "Dape/LLDB hits a Zig breakpoint and evaluates a local" {
-  run zig build --build-file /tmp/flight-tests/zig/build.zig \
-    --cache-dir /tmp/flight-tests/zig/.zig-cache \
-    --global-cache-dir /tmp/flight-tests/zig/.zig-global-cache \
-    --prefix /tmp/flight-tests/zig/zig-out
-  echo "$output"
-  [ "$status" -eq 0 ]
   run dape_launch_for /tmp/flight-tests/zig/src/main.zig lldb-dap \
-    /tmp/flight-tests/zig/zig-out/bin/flight-test /tmp/flight-tests/zig/ \
+    "" /tmp/flight-tests/zig/ \
     'std.debug.print(\"{d}\\n\", .{debug_value})' debug_value
   echo "Zig/LLDB: $output"
   [ "$status" -eq 0 ]
@@ -1662,6 +1800,61 @@ EOF
   run eval_elisp '(progn (find-file "/tmp/smoketest/test.c") (key-binding (kbd "SPC d d")))'
   [ "$status" -eq 0 ]
   [[ "$output" =~ "dape" ]]
+}
+
+@test "SPC d d selects Delve for Go without prompting for an adapter" {
+  run eval_elisp '(progn
+    (require (quote dape))
+    (find-file "/tmp/flight-tests/go/flight-test.go")
+    (let (selected prompted)
+      (cl-letf (((symbol-function (quote dape))
+                 (lambda (config &optional _skip-compile)
+                   (setq selected config)))
+                ((symbol-function (quote completing-read))
+                 (lambda (&rest _) (setq prompted t) (error "unexpected prompt"))))
+        (let ((command (key-binding (kbd "SPC d d"))))
+          (call-interactively command)
+          (list command (plist-get selected :type) prompted)))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(+systems-dape "go" nil)' ]]
+}
+
+@test "SPC d d selects debugpy for Python without prompting for an adapter" {
+  run eval_elisp '(progn
+    (require (quote dape))
+    (find-file "/tmp/flight-tests/python/deploy.py")
+    (let (selected prompted)
+      (cl-letf (((symbol-function (quote dape))
+                 (lambda (config &optional _skip-compile)
+                   (setq selected config)))
+                ((symbol-function (quote completing-read))
+                 (lambda (&rest _) (setq prompted t) (error "unexpected prompt"))))
+        (let ((command (key-binding (kbd "SPC d d"))))
+          (call-interactively command)
+          (list command (plist-get selected :type) prompted)))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(+systems-dape "python" nil)' ]]
+}
+
+@test "SPC d b functionally toggles breakpoints before Dape loads" {
+  run eval_elisp '(mapcar
+    (lambda (file)
+      (find-file file)
+      (goto-char (point-min))
+      (let ((command (key-binding (kbd "SPC d b"))))
+        (list major-mode command (commandp command)
+              (progn (call-interactively command)
+                     (not (null (dape--breakpoints-at-point))))
+              (progn (call-interactively command)
+                     (null (dape--breakpoints-at-point))))))
+    (quote ("/tmp/flight-tests/ruby/deploy.rb"
+            "/tmp/flight-tests/rust/src/main.rs")))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'(ruby-mode dape-breakpoint-toggle t t t)'* ]]
+  [[ "$output" == *'(rustic-mode dape-breakpoint-toggle t t t)'* ]]
 }
 
 @test "global keybinding SPC o D resolves to docker (config/default :tools docker)" {

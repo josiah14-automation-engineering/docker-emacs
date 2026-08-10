@@ -4,6 +4,8 @@
 (package! nushell-ts-mode)      ; Tree-sitter mode for highlighting, indentation, completion.
 (package! flycheck-golangci-lint) ;; inline golangci-lint diagnostics in go-mode
 (package! bats-mode)            ;; major mode for editing/running .bats test files
+(package! feature-mode          ;; Gherkin/Cucumber .feature editing and navigation
+  :pin "8d43c37ddf986af769870da27c31c1911f35b205")
 (package! fish-mode)            ;; major mode for .fish scripts (wwwjfy/emacs-fish)
 (package! toml-mode)            ;; major mode for .toml files (dryman/toml-mode.el)
 

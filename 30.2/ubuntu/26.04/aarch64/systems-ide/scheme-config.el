@@ -130,14 +130,18 @@ Same cost profile as `geiser-guile--guess': a single bounded
 ;; explicitly for literal `scheme-mode' buffers while preserving the upstream
 ;; guard for derived modes such as `gerbil-mode'.
 (defun +geiser--activate-mode-h ()
-  "Activate Geiser only in a literal `scheme-mode' buffer."
+  "Activate Geiser and its detected REPL in a literal `scheme-mode' buffer."
   (when (eq major-mode 'scheme-mode)
     ;; A dialect-marked file may be the first Scheme buffer opened.  Load
     ;; every configured detector before Geiser attempts its initial guess.
     (require 'geiser-chez)
     (require 'geiser-gambit)
     (require 'geiser-guile)
-    (geiser-mode)))
+    (geiser-mode)
+    (when-let ((impl (geiser-impl--guess)))
+      (setq mode-name (format "%s Scheme" (capitalize (symbol-name impl))))
+      (save-window-excursion
+        (geiser-repl-switch nil impl (current-buffer))))))
 
 (add-hook! 'scheme-mode-hook #'+geiser--activate-mode-h)
 

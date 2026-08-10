@@ -3312,3 +3312,141 @@ breakpoint/register test in full-suite ordering.
 The already-known post-results unclean-exit issue remains deliberately deferred
 to the next task. It occurs after Bats prints all results and is not being
 hidden or conflated with functional assertion failures.
+
+## Geiser automatic-start regression
+
+The prior Geiser tests explicitly called `geiser-repl-switch` before checking
+evaluation and completion. They therefore proved that an already-started REPL
+worked, but could not catch the user-visible failure: opening a correctly
+detected Chez, Gambit, or Guile file left no associated live REPL.
+
+A test-first regression check now opens each flight file from a clean Geiser
+process/buffer state without calling any REPL-start command. It requires the
+correct detected implementation, a live associated REPL, and the same
+implementation in that REPL. Against the previous image it failed exactly as
+reported:
+
+```elisp
+((chez nil nil) (gambit nil nil) (guile nil nil))
+```
+
+The shared literal `scheme-mode` hook now activates Geiser, detects the dialect,
+and starts/associates that implementation's REPL without changing the visible
+window. Ambiguous Scheme remains unresolved, and Gerbil remains outside Geiser.
+
+The rebuilt image used the identity listed above. All **9/9 focused Scheme and
+Geiser tests passed**, followed by all **160/160 complete-suite tests `ok`**.
+The known post-results exit hang still occurred after Bats printed test 160 and
+was interrupted; fixing that cleanup issue remains the next separate task.
+
+## Gerbil keyword completion regression
+
+The Gerbil completion test called `company-keywords` and
+`company-dabbrev-code` directly, bypassing the backend path used by interactive
+completion. Replacing it with `company-manual-begin` exposed the reported gap:
+local `greet` completed, but the core Scheme form `define` did not.
+
+Gerbil already reused Company's Scheme vocabulary, but that upstream list
+contains procedures and omits core syntax forms. The existing Gerbil keyword
+entry now adds the small Scheme/Gerbil syntax and declaration set before that
+vocabulary. The behavioral test opens the real Gerbil flight file and invokes
+`company-manual-begin` separately for core Scheme forms `define`, `lambda`, and
+`set!`, Gerbil forms `package:` and `def`, and the local definition `greet`.
+Each must appear in the candidates produced through the interactive backend.
+
+The rebuilt image passed the focused completion test, all **20/20 Scheme,
+Geiser, and Gerbil tests**, and all **160/160 complete-suite assertions**. The
+known post-results exit hang was again interrupted after test 160.
+
+## Cold Dape keybinding and Scheme mode-line regressions
+
+`SPC d b` was bound to `dape-breakpoint-toggle`, but the installed Dape does
+not autoload that command. Before any other Dape action loaded the package,
+invoking the binding therefore failed with `Wrong type argument: commandp` in
+Ruby and Rust. Existing debugger tests called Dape functions
+directly after explicitly requiring Dape, so they could not expose the broken
+interactive startup path.
+
+A new cold-state functional test opens real Ruby and Rust flight
+files, resolves `SPC d b`, requires the result to be an interactive command,
+invokes it, verifies a breakpoint exists at point, invokes it again, and
+verifies removal. The shared configuration now declares the missing upstream
+autoload once; no language-specific bindings were added.
+
+Scheme implementation detection and automatic REPL startup were functional,
+but all three dialects still displayed only `Scheme`. A separate test now
+requires the real Chez, Gambit, and Guile flight buffers to display `Chez
+Scheme`, `Gambit Scheme`, and `Guile Scheme`. The existing detection hook sets
+that buffer-local display name from the same implementation it uses to start
+Geiser; ambiguous Scheme remains generic.
+
+Both regression tests failed against the prior image with the exact reported
+behaviors. After rebuilding with the documented identity, the full focused
+Dape regression passed **21/21**, including every real adapter launch,
+breakpoint, stop, and value evaluation. The complete suite passed all
+**162/162 assertions**. The known post-results exit hang was interrupted after
+test 162.
+
+JavaScript and TypeScript remain intentionally LSP-only secondary languages.
+No JavaScript DAP adapter is installed or claimed; their brief inclusion in
+the cold breakpoint test was removed once that scope was made explicit.
+
+## Go, Zig, shell LSP, Cucumber, and debugger-harness regressions
+
+Further manual testing found four behavioral gaps that installation and
+configuration assertions could not catch. Each received a failing functional
+test before its fix:
+
+- `SPC d d` prompted Go users to choose an adapter. The regression test invokes
+  the real keybinding while making any prompt fail; it now proves that Go
+  selects Dape's `:type "go"` Delve configuration directly. C and Rust retain
+  their chooser because both GDB and LLDB are supported intentionally.
+- Zig debugging depended on a manually prebuilt binary. The deep test stopped
+  building or supplying one and initially returned `(nil nil nil nil nil nil)`.
+  The Zig program resolver now runs `zig build`, finds `zig-out/bin`, launches
+  LLDB, hits the source breakpoint, and evaluates the real local value `42`.
+- Opening Zsh or Ksh called Doom's generic `lsp!` hook even though BashLS does
+  not support those dialects. The old image returned `((zsh nil t) (pdksh nil
+  t))`, where the final `t` records the user-visible missing-server warning.
+  The hook is now dialect-gated; the behavioral result is `((zsh nil nil)
+  (pdksh nil nil))`, while Bash and Bats still connect and return symbols.
+- Opening a Cucumber `.feature` file had no Gherkin integration; the first test
+  failed with `void-function feature-detect-language`. The pinned `feature-mode`
+  package now provides mode detection, English dialect detection, indentation,
+  fontification, and interactive scenario, buffer, project, and step-definition
+  commands. This is editor support only; no redundant per-language Cucumber
+  runner was added.
+
+The shared Dape acceptance helper also contained two test defects exposed by
+full-suite ordering. Rust/LLDB source breakpoints were racy before launch, and
+Dape's cached thread stack could remain empty even after the adapter reported a
+real stopped state. The Rust path now stops on entry, installs a verified
+`flight_test::main` function breakpoint, continues, steps to the value, and
+evaluates `debug_value`. Stack inspection now sends an authoritative blocking
+DAP `stackTrace` request instead of trusting stale UI cache state. Zig and
+Assembly retain exact source-breakpoint assertions.
+
+The final image passed the focused deep debugger checks **3/3**, the complete
+Dape regression **22/22**, and the full suite **165/165**. Every TAP result was
+printed as `ok`; the known post-results Bats/Doom exit hang was then interrupted.
+A separate stale container, stuck for 27 hours in RealGUD/zshdb executing
+`flight-tests/zsh/debug.zsh`, was stopped after its state was confirmed.
+
+## Python debugger auto-selection
+
+Python's debugpy integration worked when selected manually, but `SPC d d`
+still opened Dape's adapter chooser. A test invoking the real keybinding while
+making any prompt fail reproduced the gap. The existing shared dispatcher now
+selects Dape's `debugpy` configuration for `python-mode` and `python-ts-mode`,
+just as it selects Delve for Go; languages with multiple valid adapters retain
+the chooser.
+
+The rebuilt image passed the no-prompt selection regression **1/1** and the
+independent deep debugpy test **1/1**, which launched debugpy, hit a real Python
+source breakpoint, and evaluated the local value. A combined first run exposed
+another transient session-transition wait in the test harness; both isolated
+behavioral checks then completed normally.
+
+The subsequent complete suite reported all **166/166 tests `ok`**, including
+the no-prompt Python selection and real debugpy breakpoint/value checks. The
+known post-results exit hang was interrupted only after test 166 printed.

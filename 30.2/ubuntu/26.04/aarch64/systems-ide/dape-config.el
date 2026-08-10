@@ -10,6 +10,22 @@
 
 ;;; Code:
 
+;; Doom binds this before Dape loads, but upstream does not autoload it.
+(autoload 'dape-breakpoint-toggle "dape" nil t)
+
+(defun +systems-dape ()
+  "Select the known adapter for Go/Python; otherwise show Dape's chooser."
+  (interactive)
+  (cond ((derived-mode-p 'go-mode 'go-ts-mode)
+         (require 'dape)
+         (dape (dape--config-eval 'dlv nil)))
+        ((derived-mode-p 'python-mode 'python-ts-mode)
+         (require 'dape)
+         (dape (dape--config-eval 'debugpy nil)))
+        (t (call-interactively #'dape))))
+
+(map! :leader :desc "Start debugger" :n "d d" #'+systems-dape)
+
 ;; dape's built-in `gdb'/`lldb-dap'/`lldb-vscode' configs all hardcode
 ;; :program "a.out" -- a generic placeholder from C's `cc foo.c' default
 ;; output name, wrong for both cargo (target/debug/<bin>) and this repo's
@@ -62,13 +78,9 @@ build; run `SPC m b b' first."
       (+dape--first-executable build-dir)))
 
   (defun +dape-zig-program ()
-    "Path to the current Zig project's built executable, or nil.
-Mirrors `+dape-cmake-program' above -- `zig build' has no single-command
-way to ask what got built (the output name comes from `build.zig''s own
-`b.addExecutable' call, not reliably derivable from the directory name),
-so this just looks for the one executable file in zig-out/bin, `zig
-build''s own fixed output location (confirmed live). Doesn't trigger a
-build; run `SPC m b' first.
+    "Build the current Zig project and return its executable, or nil.
+`zig build' has no single-command way to report the output name (it comes
+from `build.zig'), so build first and scan Zig's fixed zig-out/bin directory.
 Falls back to the current buffer's own basename, sans extension, when no
 build.zig exists anywhere up the tree -- confirmed live that a lone-file
 `zig build-exe foo.zig' compile produces `./foo' in the current
@@ -78,10 +90,11 @@ and safely return nil on no match) -- otherwise this fallback would
 return a bogus non-nil path for *any* buffer with no Cargo.toml/
 CMakeLists.txt/build.zig anywhere up its tree, e.g. shadowing asm-mode's
 own \"a.out\" fallback below with a wrong basename-derived guess instead."
-    (if-let* ((root (locate-dominating-file default-directory "build.zig"))
-              (bin-dir (expand-file-name "zig-out/bin" root))
-              ((file-directory-p bin-dir)))
-        (+dape--first-executable bin-dir)
+    (if-let* ((root (locate-dominating-file default-directory "build.zig")))
+        (let ((default-directory root))
+          (unless (zerop (call-process "zig" nil nil nil "build"))
+            (user-error "zig build failed"))
+          (+dape--first-executable (expand-file-name "zig-out/bin" root)))
       (when (and (derived-mode-p 'zig-mode) (buffer-file-name))
         (file-name-sans-extension (buffer-file-name)))))
 

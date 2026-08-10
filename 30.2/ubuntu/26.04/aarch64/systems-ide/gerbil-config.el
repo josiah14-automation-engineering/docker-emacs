@@ -63,11 +63,14 @@
     "Set buffer-local completion behavior for Gerbil."
     (setq-local company-dabbrev-minimum-length 3))
 
-  ;; Gerbil has no semantic completion provider. Reuse Company's Scheme
-  ;; vocabulary and add Gerbil's top-level package declaration; dabbrev below
-  ;; supplies project-local definitions without coupling completion to a REPL.
+  ;; Company's Scheme list covers procedures but omits core syntax forms.
+  ;; Add those plus Gerbil's declarations; dabbrev supplies local definitions.
   (setf (alist-get 'gerbil-mode company-keywords-alist)
-        (cons "package:" (alist-get 'scheme-mode company-keywords-alist)))
+        (append '("and" "begin" "case" "cond" "def" "define"
+                  "define-syntax" "do" "else" "export" "if" "import"
+                  "lambda" "let" "let*" "letrec" "or" "package:"
+                  "unless" "when")
+                (alist-get 'scheme-mode company-keywords-alist)))
   (set-company-backend! 'gerbil-mode
     '(:separate company-keywords company-dabbrev-code)
     'company-capf 'company-yasnippet)

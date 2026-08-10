@@ -53,6 +53,15 @@ that auto-detection can't dialect-guess."
 
 (add-hook! 'sh-mode-hook #'+shell--sync-shell-file)
 
+;; BashLS supports POSIX sh and Bash, not Zsh or Ksh.
+(after! sh-script
+  (remove-hook 'sh-mode-local-vars-hook #'lsp!)
+  (add-hook 'sh-mode-local-vars-hook
+            (defun +shell-lsp-maybe-h ()
+              (when (memq sh-shell '(sh bash))
+                (lsp!)))
+            'append))
+
 (dolist (config '((+shell-bash-mode "\\.bash\\'"
                              "\\.bashrc\\'"
                              "\\.bash_aliases\\'"
