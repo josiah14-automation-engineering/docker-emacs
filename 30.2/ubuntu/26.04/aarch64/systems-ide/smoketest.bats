@@ -1473,6 +1473,8 @@ EOF
   run eval_elisp '(progn
     (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
     (goto-char (point-min))
+    (search-forward "(defun greet")
+    (beginning-of-line)
     (let ((previous sly-last-compilation-result))
       (sly-compile-defun)
       (let ((deadline (+ (float-time) 20)))
@@ -1490,11 +1492,10 @@ EOF
                            (looking-at-p "(defun greet"))))
           (sleep-for 0.2)))
       (beginning-of-line)
-      (list command (buffer-file-name) (line-number-at-pos)
-            (looking-at-p "(defun greet"))))'
+      (list command (buffer-file-name) (looking-at-p "(defun greet"))))'
   echo "$output"
   [ "$status" -eq 0 ]
-  [[ "$output" == '(sly-edit-definition "/tmp/flight-tests/common-lisp/hello.lisp" 1 t)' ]]
+  [[ "$output" == '(sly-edit-definition "/tmp/flight-tests/common-lisp/hello.lisp" t)' ]]
 }
 
 @test "Sly completion returns a definition compiled into the live Lisp image" {
@@ -1504,6 +1505,8 @@ EOF
       (while (and (< (float-time) deadline) (not (sly-connected-p)))
         (sleep-for 0.2)))
     (goto-char (point-min))
+    (search-forward "(defun greet")
+    (beginning-of-line)
     (let ((previous sly-last-compilation-result))
       (sly-compile-defun)
       (let ((deadline (+ (float-time) 20)))
@@ -1511,6 +1514,75 @@ EOF
                     (eq previous sly-last-compilation-result))
           (sleep-for 0.2))))
     (and (member "greet" (car (sly-simple-completions "gre"))) t))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == 't' ]]
+}
+
+@test "Common Lisp highlights standard assignment macros as syntax" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (goto-char (point-max))
+    (let ((start (point))
+          (forms (quote ("setq" "setf" "psetq" "psetf" "shiftf"
+                          "rotatef" "incf" "decf" "push" "pushnew"
+                          "pop" "remf" "multiple-value-setq"))))
+      (dolist (form forms)
+        (insert "\n(" form " value value)"))
+    (font-lock-ensure)
+      (prog1
+          (mapcar
+           (lambda (form)
+             (goto-char start)
+             (search-forward (concat "(" form))
+             (let ((face (get-text-property (- (point) (length form))
+                                            (quote face))))
+               (if (listp face)
+                   (and (memq (quote font-lock-keyword-face) face) t)
+                 (eq face (quote font-lock-keyword-face)))))
+           forms)
+        (delete-region start (point-max)))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(t t t t t t t t t t t t t)' ]]
+}
+
+@test "Common Lisp autosuggestions include same-file definitions" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (goto-char (point-max))
+    (let (results)
+      (dolist (case (quote (("gre" "greet")
+                            ("josiah-gr" "josiah-greet"))))
+        (let ((start (point)))
+          (insert "\n(" (car case))
+          (company-manual-begin)
+          (push (and (member (cadr case) company-candidates) t) results)
+          (company-abort)
+          (delete-region start (point-max))))
+      (nreverse results)))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(t t)' ]]
+}
+
+@test "Common Lisp autosuggestions include definitions from a loaded module" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (let ((loaded
+           (sly-eval
+            (quote (slynk:eval-and-grab-output
+                    "(handler-case (progn (load \"/tmp/flight-tests/common-lisp/hello.lisp\") (princ \"LOADED\")) (error (condition) (princ condition)))")))))
+      (unless (and (stringp (car loaded))
+                   (string-suffix-p "LOADED" (car loaded)))
+        (error "Common Lisp module load failed: %S" loaded)))
+    (goto-char (point-max))
+    (let ((start (point)))
+      (insert "\n(utils-gr")
+      (company-manual-begin)
+      (prog1 (and (member "utils-greet" company-candidates) t)
+        (company-abort)
+        (delete-region start (point-max)))))'
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == 't' ]]

@@ -3493,3 +3493,32 @@ second and assuming completion. The
 focused Common Lisp suite passed **8/8**, followed by all **174/174 full-suite
 tests `ok`**. The known post-results exit hang was interrupted only after test
 174 printed.
+
+## Common Lisp syntax and autosuggestion regressions
+
+Manual editing exposed two behaviors absent from the initial acceptance
+contract. Emacs's native Common Lisp font-lock table omits modifying macros,
+so forms such as `setq` and `decf` remained unhighlighted. The Common Lisp
+hook now enables the full native level-two table and supplements its missing
+standard modifying forms. A functional test inserts and font-locks `setq`,
+`setf`, `psetq`, `psetf`, `shiftf`, `rotatef`, `incf`, `decf`, `push`,
+`pushnew`, `pop`, `remf`, and `multiple-value-setq`; every symbol must receive
+`font-lock-keyword-face`.
+
+Sly/Slynk completion is image-based: a symbol typed in a buffer does not exist
+in SBCL until evaluated or compiled. The `lisp-mode` Company backend now
+merges Sly's CAPF candidates with `company-dabbrev-code`. The behavioral test
+invokes `company-manual-begin` and requires both same-file definitions,
+`greet` and `josiah-greet`, before compiling them. A second fixture defines
+and exports `utils-greet` from another package; the test loads the importing
+file into SBCL and requires the same interactive Company path to return the
+exported symbol.
+
+Adding the package fixture also exposed two older tests that compiled the
+first form by position and therefore silently depended on `greet` remaining
+on line one. They now locate the real definition before compiling it and
+verify navigation by source content rather than a fixed line number.
+
+The rebuilt image passed all **11/11 focused Common Lisp tests** and all
+**177/177 complete-suite tests `ok`**. The known post-results exit hang was
+interrupted only after test 177 printed.
