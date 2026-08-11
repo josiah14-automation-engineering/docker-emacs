@@ -3450,3 +3450,46 @@ behavioral checks then completed normally.
 The subsequent complete suite reported all **166/166 tests `ok`**, including
 the no-prompt Python selection and real debugpy breakpoint/value checks. The
 known post-results exit hang was interrupted only after test 166 printed.
+
+## Common Lisp, SBCL, and Sly integration
+
+Common Lisp support now installs SBCL and enables Doom's `common-lisp` module.
+The first image exposed two real Sly startup failures that presence checks
+would have missed: `sly-quicklisp` required a Quicklisp distribution that the
+SBCL-only image does not install, and `sly-stepper` required the absent
+`agnostic-lizard` Lisp system. Both dropped automatic startup into SLDB.
+Only those two contribs are disabled; core Sly plus `sly-fancy`, `sly-asdf`,
+`sly-macrostep`, and `sly-repl-ansi-color` remain enabled.
+The Sly-specific setting lives in `common-lisp-config.el`, copied explicitly
+into Doom by the Dockerfile and loaded with the other language configurations.
+
+The initial tests also contained incorrect assumptions. A callback passed to
+`sly-eval` was interpreted as its package argument; the asynchronous API is
+`sly-eval-async`. Slynk's evaluation result contains printed output and
+SBCL's displayed value, not `NIL`. Doom registers Apheleia's Common Lisp
+formatter as `lisp-indent`, and Flycheck's globally enabled minor mode does
+not imply that a Common Lisp checker exists. The tests now assert observable
+behavior rather than those implementation guesses.
+
+Eight Common Lisp acceptance tests cover the supported contract:
+
+- opening the real flight file activates `lisp-mode`, automatically connects
+  Sly, and evaluates through the live SBCL/Slynk image;
+- the actual `SPC m e e` command changes Lisp state, and `SPC m g d` navigates
+  to the real source definition;
+- Sly completion returns a user definition compiled into the Lisp image;
+- the registered Apheleia formatter completes and reindents malformed source;
+- compiling an erroneous form produces a concrete SBCL diagnostic containing
+  the bad source value;
+- Flycheck resolves no checker for `lisp-mode`, and Common Lisp does not start
+  an unrelated LSP client; diagnostics therefore come from Sly/SBCL.
+
+The formatter test first passed alone but failed in full-suite order because
+it guessed completion from asynchronous save timing. It now waits for
+Apheleia's own completion callback and passed in the persistent daemon. The
+interactive evaluation and definition-navigation tests likewise poll the
+actual SBCL value and Sly compilation result instead of sleeping for one
+second and assuming completion. The
+focused Common Lisp suite passed **8/8**, followed by all **174/174 full-suite
+tests `ok`**. The known post-results exit hang was interrupted only after test
+174 printed.

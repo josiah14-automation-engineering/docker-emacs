@@ -178,6 +178,7 @@ COPY --chown=${USERNAME}:${USERNAME} config.el /home/${USERNAME}/.config/doom/co
 COPY --chown=${USERNAME}:${USERNAME} init.el /home/${USERNAME}/.config/doom/init.el
 COPY --chown=${USERNAME}:${USERNAME} packages.el /home/${USERNAME}/.config/doom/packages.el
 COPY --chown=${USERNAME}:${USERNAME} all-lisps-config.el /home/${USERNAME}/.config/doom/all-lisps-config.el
+COPY --chown=${USERNAME}:${USERNAME} common-lisp-config.el /home/${USERNAME}/.config/doom/common-lisp-config.el
 COPY --chown=${USERNAME}:${USERNAME} shell-config.el /home/${USERNAME}/.config/doom/shell-config.el
 COPY --chown=${USERNAME}:${USERNAME} sh-keybindings.el /home/${USERNAME}/.config/doom/sh-keybindings.el
 COPY --chown=${USERNAME}:${USERNAME} c-keybindings.el /home/${USERNAME}/.config/doom/c-keybindings.el
@@ -361,6 +362,8 @@ RUN printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' 
     `# --- rust ide ---` \
     libssl-dev \
     pkg-config \
+    `# --- common lisp ide ---` \
+    sbcl \
     `# --- lua ide ---` \
     lua5.4 \
     `# --- scripting languages ---` \

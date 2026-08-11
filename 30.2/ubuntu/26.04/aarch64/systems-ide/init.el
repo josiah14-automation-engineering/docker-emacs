@@ -49,6 +49,7 @@
 
        :lang
        (cc +lsp)
+       common-lisp
        data
        emacs-lisp
        (go +lsp)

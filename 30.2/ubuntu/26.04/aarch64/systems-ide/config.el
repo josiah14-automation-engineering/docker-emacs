@@ -125,6 +125,7 @@
 ;; load language configs and keybindings
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (load! "all-lisps-config")
+(load! "common-lisp-config")
 (load! "go-config")
 (load! "shell-config")
 (load! "bats-config")

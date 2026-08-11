@@ -162,6 +162,17 @@ EOF
   cat > /tmp/smoketest/test.ss <<'EOF'
 (def (greet name) (displayln name))
 EOF
+  cat > /tmp/smoketest/test.lisp <<'EOF'
+(defun greet (name) (format nil "hi ~a" name))
+EOF
+  cat > /tmp/smoketest/test-fmt.lisp <<'EOF'
+(defun greet (name)
+(format nil "hi ~a" name))
+EOF
+  cat > /tmp/smoketest/test-diagnostics.lisp <<'EOF'
+(defun broken ()
+  (+ "not-a-number" 1))
+EOF
   cat > /tmp/smoketest/test.c <<'EOF'
 int main(void) {
     volatile int value = 42;
@@ -1402,6 +1413,152 @@ EOF
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == '(gerbil-mode t t t t t t)' ]]
+}
+
+@test "sbcl is installed and reports a version" {
+  run sbcl --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "SBCL" ]]
+}
+
+@test "opening Common Lisp starts Sly and evaluates in SBCL" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (let ((deadline (+ (float-time) 30)))
+      (while (and (< (float-time) deadline) (not (sly-connected-p)))
+        (sleep-for 0.2)))
+    (let (result)
+      (when (sly-connected-p)
+        (sly-eval-async
+            (quote (slynk:eval-and-grab-output "(princ (+ 20 22))"))
+          (lambda (value) (setq result value)))
+        (let ((deadline (+ (float-time) 20)))
+          (while (and (< (float-time) deadline) (not result))
+            (sleep-for 0.2))))
+      (list major-mode (and (sly-connected-p) t)
+            (car result)
+            (and (stringp (cadr result))
+                 (string-prefix-p "42" (cadr result))))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(lisp-mode t "42" t)' ]]
+}
+
+@test "Common Lisp localleader evaluation command changes live SBCL state" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (goto-char (point-max))
+    (insert "\n(defparameter *systems-smoketest* 42)")
+    (let ((command (key-binding (kbd "SPC m e e"))) result)
+      (call-interactively command)
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (< (float-time) deadline)
+                    (not (equal (car result) "42")))
+          (setq result
+                (sly-eval
+                 (quote (slynk:eval-and-grab-output
+                         "(when (boundp (quote *systems-smoketest*)) (princ *systems-smoketest*))"))))
+          (unless (equal (car result) "42")
+            (sleep-for 0.2))))
+      (list command
+            (car result)
+            (and (stringp (cadr result))
+                 (string-prefix-p "42" (cadr result))))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(sly-eval-last-expression "42" t)' ]]
+}
+
+@test "Common Lisp localleader definition command jumps to real source" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (goto-char (point-min))
+    (let ((previous sly-last-compilation-result))
+      (sly-compile-defun)
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (< (float-time) deadline)
+                    (eq previous sly-last-compilation-result))
+          (sleep-for 0.2))))
+    (goto-char (point-max))
+    (search-backward "greet \"systems-ide\"")
+    (let ((command (key-binding (kbd "SPC m g d"))))
+      (call-interactively command)
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (< (float-time) deadline)
+                    (not (save-excursion
+                           (beginning-of-line)
+                           (looking-at-p "(defun greet"))))
+          (sleep-for 0.2)))
+      (beginning-of-line)
+      (list command (buffer-file-name) (line-number-at-pos)
+            (looking-at-p "(defun greet"))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(sly-edit-definition "/tmp/flight-tests/common-lisp/hello.lisp" 1 t)' ]]
+}
+
+@test "Sly completion returns a definition compiled into the live Lisp image" {
+  run eval_elisp '(progn
+    (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
+    (let ((deadline (+ (float-time) 30)))
+      (while (and (< (float-time) deadline) (not (sly-connected-p)))
+        (sleep-for 0.2)))
+    (goto-char (point-min))
+    (let ((previous sly-last-compilation-result))
+      (sly-compile-defun)
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (< (float-time) deadline)
+                    (eq previous sly-last-compilation-result))
+          (sleep-for 0.2))))
+    (and (member "greet" (car (sly-simple-completions "gre"))) t))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == 't' ]]
+}
+
+@test "Common Lisp format-on-save functionally reindents the buffer" {
+  run eval_elisp '(with-current-buffer (find-file-noselect "/tmp/smoketest/test-fmt.lisp")
+    (require (quote apheleia))
+    (let ((done nil) (formatter (alist-get major-mode apheleia-mode-alist)))
+      (apheleia-format-buffer formatter (lambda (&rest _) (setq done t)))
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (not done) (< (float-time) deadline))
+          (sleep-for 0.2)))
+      (goto-char (point-min))
+      (forward-line 1)
+      (list apheleia-mode formatter done (current-indentation))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(t lisp-indent t 2)' ]]
+}
+
+@test "Sly reports concrete SBCL diagnostics at the erroneous source" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test-diagnostics.lisp")
+    (goto-char (point-min))
+    (let ((previous sly-last-compilation-result))
+      (sly-compile-defun)
+      (let ((deadline (+ (float-time) 20)))
+        (while (and (< (float-time) deadline)
+                    (eq previous sly-last-compilation-result))
+          (sleep-for 0.2)))
+      (list (sly-compilation-result.successp sly-last-compilation-result)
+            (sly-compiler-notes))))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "not-a-number" ]]
+}
+
+@test "Common Lisp has no Flycheck checker or LSP client" {
+  run eval_elisp '(progn
+    (find-file "/tmp/smoketest/test.lisp")
+    (require (quote flycheck))
+    (list major-mode
+          (flycheck-get-checker-for-buffer)
+          (bound-and-true-p lsp-mode)))'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == '(lisp-mode nil nil)' ]]
 }
 
 @test "opening a .c file activates c-mode" {
