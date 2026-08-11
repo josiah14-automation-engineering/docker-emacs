@@ -3506,13 +3506,15 @@ standard modifying forms. A functional test inserts and font-locks `setq`,
 `font-lock-keyword-face`.
 
 Sly/Slynk completion is image-based: a symbol typed in a buffer does not exist
-in SBCL until evaluated or compiled. The `lisp-mode` Company backend now
-merges Sly's CAPF candidates with `company-dabbrev-code`. The behavioral test
-invokes `company-manual-begin` and requires both same-file definitions,
-`greet` and `josiah-greet`, before compiling them. A second fixture defines
-and exports `utils-greet` from another package; the test loads the importing
-file into SBCL and requires the same interactive Company path to return the
-exported symbol.
+in SBCL until evaluated or compiled. The first attempted fix merged Sly CAPF
+with `company-dabbrev-code`, and its test merely checked `member`. Live use
+showed `josiah-greet` was appended after roughly a thousand Sly candidates:
+technically present, but effectively absent from the popup. The backend now
+prioritizes current-buffer definitions, definitions parsed from explicitly
+referenced `.lisp` files, and then Sly's image candidates. The behavioral
+tests invoke `company-manual-begin` and require `greet`, `josiah-greet`, and
+the unopened imported-file definition `utils-greet` within the first ten
+popup candidates, without compiling or loading them into SBCL first.
 
 Adding the package fixture also exposed two older tests that compiled the
 first form by position and therefore silently depended on `greet` remaining

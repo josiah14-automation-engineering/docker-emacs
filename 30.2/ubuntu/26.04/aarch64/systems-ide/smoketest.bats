@@ -1557,7 +1557,8 @@ EOF
         (let ((start (point)))
           (insert "\n(" (car case))
           (company-manual-begin)
-          (push (and (member (cadr case) company-candidates) t) results)
+          (push (and (member (cadr case) (seq-take company-candidates 10)) t)
+                results)
           (company-abort)
           (delete-region start (point-max))))
       (nreverse results)))'
@@ -1566,21 +1567,17 @@ EOF
   [[ "$output" == '(t t)' ]]
 }
 
-@test "Common Lisp autosuggestions include definitions from a loaded module" {
+@test "Common Lisp autosuggestions prioritize definitions from an imported file" {
   run eval_elisp '(progn
     (find-file "/tmp/flight-tests/common-lisp/hello.lisp")
-    (let ((loaded
-           (sly-eval
-            (quote (slynk:eval-and-grab-output
-                    "(handler-case (progn (load \"/tmp/flight-tests/common-lisp/hello.lisp\") (princ \"LOADED\")) (error (condition) (princ condition)))")))))
-      (unless (and (stringp (car loaded))
-                   (string-suffix-p "LOADED" (car loaded)))
-        (error "Common Lisp module load failed: %S" loaded)))
+    (when-let ((buffer (get-file-buffer
+                        "/tmp/flight-tests/common-lisp/utils.lisp")))
+      (kill-buffer buffer))
     (goto-char (point-max))
     (let ((start (point)))
       (insert "\n(utils-gr")
       (company-manual-begin)
-      (prog1 (and (member "utils-greet" company-candidates) t)
+      (prog1 (and (member "utils-greet" (seq-take company-candidates 10)) t)
         (company-abort)
         (delete-region start (point-max)))))'
   echo "$output"

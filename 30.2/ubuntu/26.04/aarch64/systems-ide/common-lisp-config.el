@@ -33,8 +33,32 @@
     "Include definitions in the current Common Lisp buffer."
     (setq-local company-dabbrev-minimum-length 2))
 
+  (defun +common-lisp-company-imported-symbols (command &optional arg &rest _)
+    "Complete definitions from Lisp files loaded by the current buffer."
+    (pcase command
+      ('interactive (company-begin-backend
+                     #'+common-lisp-company-imported-symbols))
+      ('prefix (and (derived-mode-p 'lisp-mode) (company-grab-symbol)))
+      ('candidates
+       (let (symbols)
+         (save-excursion
+           (goto-char (point-min))
+           (while (re-search-forward "\"\\([^\"]+\\.lisp\\)\"" nil t)
+             (let ((file (expand-file-name (match-string-no-properties 1)
+                                           default-directory)))
+               (when (file-readable-p file)
+                 (with-temp-buffer
+                   (insert-file-contents file)
+                   (goto-char (point-min))
+                   (while (re-search-forward
+                           "^[[:space:]]*(def[^][()[:space:]]+[[:space:]]+\\([^][()[:space:]]+\\)"
+                           nil t)
+                     (push (match-string-no-properties 1) symbols)))))))
+         (all-completions arg (delete-dups symbols))))))
+
   (set-company-backend! 'lisp-mode
-    '(:separate company-capf company-dabbrev-code)
+    '(:separate company-dabbrev-code
+                +common-lisp-company-imported-symbols company-capf)
     'company-yasnippet)
   (add-hook! 'lisp-mode-hook #'+common-lisp--company-init-h))
 
